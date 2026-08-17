@@ -1,0 +1,57 @@
+{
+  "name": "openficm",
+  "version": "0.5.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-navigation/bottom-tabs": "^7.18.16",
+    "@react-navigation/native": "^7.3.16",
+    "@react-navigation/native-stack": "^7.18.8",
+    "expo": "~57.0.14",
+    "expo-asset": "~57.0.12",
+    "expo-build-properties": "~57.0.12",
+    "expo-crypto": "~57.0.1",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.4",
+    "expo-font": "~57.0.1",
+    "expo-secure-store": "~57.0.1",
+    "expo-sharing": "~57.0.13",
+    "expo-sqlite": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.2",
+    "llama.rn": "0.12.9",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-keyboard-controller": "1.21.9",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-worklets": "0.10.1",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "models:download": "powershell -ExecutionPolicy Bypass -File scripts/download-models.ps1",
+    "type-check": "tsc --noEmit",
+    "android:prebuild": "expo prebuild --platform android",
+    "android:apk": "cd android && gradlew.bat assembleRelease",
+    "android:apk:debug": "cd android && gradlew.bat assembleDebug"
+  },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      }
+    }
+  },
+  "private": true
+}

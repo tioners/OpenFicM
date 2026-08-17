@@ -6,7 +6,15 @@ let runtimeConfigPromise: Promise<RuntimeConfig | null> | null = null;
 let runtimeConfig: RuntimeConfig | null = null;
 
 function normalizeBackendBaseUrl(value: string): string {
-  return value.replace(/\/+$/, "");
+  return value.trim().replace(/\/+$/, "");
+}
+
+function isNativeApp(): boolean {
+  if (typeof window === "undefined") return false;
+  const capacitor = (window as Window & {
+    Capacitor?: { isNativePlatform?: () => boolean };
+  }).Capacitor;
+  return capacitor?.isNativePlatform?.() === true;
 }
 
 function isRuntimeConfig(value: unknown): value is RuntimeConfig {
@@ -55,7 +63,7 @@ export function getRuntimeConfig(): RuntimeConfig | null {
  * when that config is unavailable could connect to an unrelated process.
  */
 export function getFallbackBackendBaseUrl(): string | null {
-  if (import.meta.env.DEV || typeof window === "undefined") return null;
+  if (import.meta.env.DEV || typeof window === "undefined" || isNativeApp()) return null;
 
   const { protocol, hostname, port } = window.location;
   const isLoopbackHostname =
@@ -71,5 +79,29 @@ export function getFallbackBackendBaseUrl(): string | null {
 
 export function getConfiguredBackendBaseUrl(): string | null {
   const explicitBackendUrl = import.meta.env.VITE_BACKEND_URL as string | undefined;
-  return explicitBackendUrl?.replace(/\/+$/, "") || getFallbackBackendBaseUrl();
+  if (explicitBackendUrl) return explicitBackendUrl.replace(/\/+$/, "");
+
+  if (typeof window !== "undefined") {
+    const queryBackendUrl = new URLSearchParams(window.location.search).get("backend");
+    if (queryBackendUrl) {
+      const normalized = normalizeBackendBaseUrl(queryBackendUrl);
+      window.localStorage.setItem("openfic.backendBaseUrl", normalized);
+      return normalized;
+    }
+
+    const storedBackendUrl = window.localStorage.getItem("openfic.backendBaseUrl");
+    if (storedBackendUrl) return normalizeBackendBaseUrl(storedBackendUrl);
+  }
+
+  return getFallbackBackendBaseUrl();
+}
+
+export function setConfiguredBackendBaseUrl(value: string): string {
+  const normalized = normalizeBackendBaseUrl(value);
+  const url = new URL(normalized);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Backend URL must use HTTP or HTTPS");
+  }
+  window.localStorage.setItem("openfic.backendBaseUrl", normalized);
+  return normalized;
 }

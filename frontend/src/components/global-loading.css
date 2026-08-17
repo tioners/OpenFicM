@@ -43,9 +43,20 @@
 
 .global-loading-error {
   margin: 0;
-  max-width: min(560px, 100%);
+  max-width: min(560px, calc(100% - 32px));
   line-height: 1.4;
   text-align: center;
+}
+
+.global-loading-actions {
+  width: min(420px, calc(100% - 32px));
+  align-items: center;
+}
+
+.global-loading-server-form {
+  display: grid;
+  width: 100%;
+  gap: 10px;
 }
 
 .global-loading-retry {

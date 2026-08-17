@@ -1,0 +1,36 @@
+name: Mobile CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile-rn/**"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile-rn/**"
+      - ".github/workflows/mobile-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-rn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile-rn/package-lock.json
+      - run: npm ci
+      - run: npm run type-check

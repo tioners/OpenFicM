@@ -21,7 +21,11 @@ import { publishDesktopAppearance, publishDesktopLanguage } from "./lib/desktop-
 import { applyCodeFontFamily, applyFontFamily, loadConfiguredFonts } from "./lib/font-utils";
 import { getOrCreateRoot } from "./lib/get-or-create-root";
 import { captureException, initErrorTelemetry } from "./lib/posthog";
-import { loadRuntimeConfig } from "./lib/runtime-config";
+import {
+  getConfiguredBackendBaseUrl,
+  loadRuntimeConfig,
+  setConfiguredBackendBaseUrl,
+} from "./lib/runtime-config";
 import { connectSocket } from "./lib/socket-client";
 import { preloadTiktokenEncoding } from "./lib/tiktoken-utils";
 
@@ -305,6 +309,11 @@ function Root() {
             {!isReady ? (
               <GlobalLoading
                 error={error}
+                backendUrl={getConfiguredBackendBaseUrl() ?? ""}
+                onBackendUrlSubmit={(value) => {
+                  setConfiguredBackendBaseUrl(value);
+                  window.location.reload();
+                }}
                 onRetry={() => window.location.reload()}
               />
             ) : (

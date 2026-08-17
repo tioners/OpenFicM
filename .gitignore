@@ -19,6 +19,8 @@
 skill-lock.json
 tmp
 data
+!mobile-rn/src/data/
+!mobile-rn/src/data/**
 frontend/lab.html
 frontend/src/local/
 AGENTS.md
@@ -32,3 +34,14 @@ desktop/node_modules
 desktop/dist
 desktop/dist-electron
 desktop/out
+.gradle-rn/
+*.apk
+*.apk.tmp
+*.jks
+*.p12
+*.lineage
+*credential*.xml
+/mobile/
+/mobile-rn/assets/models/*.gguf
+/mobile-rn/android/app/*.keystore
+/mobile-rn/android/local.properties

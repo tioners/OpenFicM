@@ -25,6 +25,7 @@ from langchain_core.messages import (
 from langchain_core.messages.tool import ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
 from langgraph._internal._constants import CONF
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
@@ -55,6 +56,7 @@ from app.agent_runtime.graph.llm_invoke import (
     invoke_model_with_retry,
     load_llm_invoke_settings,
 )
+from app.core.json_schema import collapse_nullable_unions, inline_local_schema_references
 from app.agent_runtime.persistence import compaction_repo
 from app.agent_runtime.tool_call_recovery import (
     build_malformed_tool_call_error,
@@ -505,6 +507,36 @@ def _to_history_dict(m: BaseMessage) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _google_tool_definition(tool: BaseTool) -> dict[str, Any]:
+    args_schema = tool.args_schema
+    schema = (
+        args_schema.model_json_schema()
+        if isinstance(args_schema, type) and issubclass(args_schema, BaseModel)
+        else tool.args
+    )
+    if not isinstance(schema, dict):
+        schema = {}
+    definitions = schema.get("$defs")
+    parameters = collapse_nullable_unions(inline_local_schema_references(
+        schema,
+        definitions if isinstance(definitions, dict) else {},
+    ))
+    if isinstance(parameters, dict) and not parameters.get("type") and isinstance(parameters.get("properties"), dict):
+        parameters["type"] = "object"
+    return {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": parameters,
+    }
+
+
+def _bind_tools(model: Any, tools: list[BaseTool]) -> Any:
+    module_name = type(model).__module__
+    if module_name.startswith("langchain_google_genai"):
+        return model.bind_tools([_google_tool_definition(tool) for tool in tools])
+    return model.bind_tools(tools)
+
+
 def create_react_agent(
     config: ReactAgentConfig,
     model: Any | None = None,
@@ -535,7 +567,7 @@ def create_react_agent(
     max_iterations = react_config.max_iterations
 
     # Bind tools to model if provided
-    bound_model = model.bind_tools(tools) if model else None
+    bound_model = _bind_tools(model, tools) if model else None
     active_audit: LLMCallAudit | None = None
 
     async def _finish_active_audit(status: str = "success") -> None:

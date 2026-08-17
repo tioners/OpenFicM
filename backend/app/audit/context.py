@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from app.audit.queue import enqueue_audit_log, next_call_sequence
 from app.core.ids import generate_id
+from app.core.json_schema import inline_local_schema_references
 from app.storage.models.llm_audit_log import LLMAuditLog
 
 
@@ -71,40 +72,6 @@ def normalize_usage_tokens(usage: dict[str, Any] | None) -> dict[str, int]:
             path=("input_token_details", "cache_read"),
             fallback_path=("prompt_tokens_details", "cached_tokens"),
         ),
-    }
-
-
-def _inline_local_schema_references(
-    schema: Any,
-    definitions: dict[str, Any],
-    resolving: frozenset[str] = frozenset(),
-) -> Any:
-    if isinstance(schema, list):
-        return [_inline_local_schema_references(item, definitions, resolving) for item in schema]
-    if not isinstance(schema, dict):
-        return schema
-
-    reference = schema.get("$ref")
-    if isinstance(reference, str) and reference.startswith("#/$defs/"):
-        definition_name = reference.removeprefix("#/$defs/")
-        definition = definitions.get(definition_name)
-        if isinstance(definition, dict) and definition_name not in resolving:
-            resolved_definition = _inline_local_schema_references(
-                definition,
-                definitions,
-                resolving | {definition_name},
-            )
-            sibling_fields = {
-                key: _inline_local_schema_references(value, definitions, resolving)
-                for key, value in schema.items()
-                if key != "$ref"
-            }
-            return {**resolved_definition, **sibling_fields}
-
-    return {
-        key: _inline_local_schema_references(value, definitions, resolving)
-        for key, value in schema.items()
-        if key != "$defs"
     }
 
 
@@ -311,7 +278,7 @@ class LLMCallAudit:
             if not isinstance(properties, dict):
                 return tool.args
             definitions = schema.get("$defs")
-            return _inline_local_schema_references(
+            return inline_local_schema_references(
                 properties,
                 definitions if isinstance(definitions, dict) else {},
             )

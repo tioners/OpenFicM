@@ -1,5 +1,5 @@
-name: Bug反馈
-description: 报告使用过程中遇到的Bug
+name: Bug 反馈
+description: 报告 OpenFicM Android 使用问题
 labels:
   - bug
 body:
@@ -19,10 +19,25 @@ body:
     attributes:
       label: 复现步骤
       placeholder: |
-        复现步骤：
         1. ...
         2. ...
         3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenFicM 版本
+      placeholder: "如: 0.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 手机与 Android 版本
+      placeholder: "如: Redmi K90 Pro Max / Android 16"
     validations:
       required: true
 
@@ -30,44 +45,10 @@ body:
     id: logs
     attributes:
       label: 日志、截图或录屏
-      description: |
-        请上传或粘贴已脱敏的错误日志、截图或录屏；
-        为确保您的隐私安全，请注意不要包含密钥、令牌或其它个人信息。
+      description: 请先移除 API Key、令牌、供应商请求内容和小说隐私数据。
       render: shell
     validations:
       required: false
-
-  - type: input
-    id: version
-    attributes:
-      label: OpenFic 版本
-      placeholder: "如: v0.7.5"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: system
-    attributes:
-      label: 运行系统
-      options:
-        - Windows
-        - macOS
-        - Linux
-        - 其他
-    validations:
-      required: true
-
-  - type: dropdown
-    id: platform
-    attributes:
-      label: 运行平台
-      options:
-        - 桌面端
-        - Python包
-        - Docker镜像
-        - 其他
-    validations:
-      required: true
 
   - type: checkboxes
     id: checks
@@ -76,5 +57,5 @@ body:
       options:
         - label: 我已搜索现有 Issue，未发现重复问题
           required: true
-        - label: 我确认未在内容中包含密钥、令牌或其他敏感信息
+        - label: 我确认提交内容不包含密钥、令牌或其他敏感信息
           required: true

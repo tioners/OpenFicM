@@ -1,119 +1,73 @@
-# OpenFic
+# OpenFicM
 
-![GitHub Repo stars](https://img.shields.io/github/stars/syrizelink/OpenFic)
-![License](https://img.shields.io/badge/License-Apache_2.0-red)
-![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
-![GitHub Release](https://img.shields.io/github/v/release/syrizelink/OpenFic?logo=githubactions&logoColor=white&color=yellow)
-![Release Downloads](https://img.shields.io/github/downloads/syrizelink/OpenFic/total?logo=github&logoColor=white&label=Release%20downloads&color=yellow)
-![PyPI - Version](https://img.shields.io/pypi/v/openfic?logo=pypi&logoColor=white&color=green)
+OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 React Native、Expo SQLite 和本地 Agent 运行时，安装后不依赖电脑、FastAPI、Socket.IO 或 Metro；只有调用用户配置的模型 API、获取供应商模型列表或检查 oh-story 内容更新时联网。
 
-中文 | [English](./README_EN.md)
+本项目是独立维护的衍生项目，并非 OpenFic 官方 Android 客户端。
 
-**OpenFic** 是一款专为小说创作打造的跨平台、用户友好、AI Native 的一站式 Vibe Writing 工具，构建设定、设计角色、定制工作流，让Agent适应你的写作流程，而非反之。
+## 下载
 
-![Demo Screenshot](./demo.png)
+前往 [GitHub Releases](https://github.com/tioners/OpenFicM/releases) 下载 APK。
 
+- 当前版本：0.5.0
+- Android 9.0 及以上
+- 仅提供 arm64-v8a，适用于主流 64 位 Android 手机
+- 官方 APK 当前签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-## 何时使用
+## 功能
 
-> [!Tip]  
-> *OpenFic 的设计理念是让 Agent 深度参与小说创作过程，而不是替你一键生成没有灵魂的文字，它首先是用户友好的小说写作工具，其次才是面向写作的 AI Agent 系统。*
+- 本地书架、卷分类、章节新建、命名、重命名和删除
+- 手机端章节编辑、自动保存、后台保存和输入法避让
+- 作品隔离的助手会话、模型切换和聊天记录管理
+- 本地角色库、世界书、全文搜索、语义索引和重排
+- 自定义 OpenAI-compatible、Google Gemini 和 Anthropic 供应商
+- 从供应商 API 获取模型列表
+- 通用、索引、上下文、工具权限、规则、技能、智能体和高级设置
+- PC 内置 Agent/Skill 与 oh-story-claudecode 内容更新、版本校验和回滚
+- 章节变化后的角色与世界书一致性检查
+- Gemini functionDeclaration 参数 schema 兼容修复
 
-#### 它适合这些场景：
+API Key 使用 Android SecureStore 保存，不写入 SQLite。作品、章节、角色、世界书和聊天内容默认只保存在手机本地。
+为兼容用户自定义的本地供应商，应用允许 HTTP Base URL；跨网络使用时请优先配置 HTTPS。
 
-- 正在写中长篇小说，需要长期维护世界观、角色、伏笔和章节信息
-- 希望 Agent 协助你发散思路、检查前后文、补全细节
-- 提供完整的设定、文风和剧情走向，希望 Agent 帮助你将灵感转化为文字
-- 你有自己的写作流程，希望按需求自定义 Prompt、Agent 和工作流
-- 看重本地数据保存、上下文管理和可持续的创作协作
+## 从源码构建
 
-#### 它不适合这些场景：
+需要 Node.js 22、Java 17、Android SDK 和 PowerShell。
 
-- 输入一句提示词，然后自动得到一整本小说，这是不切实际的
-- 主要需要短篇文案、社媒内容或一次性的通用文本生成
-- 你不打算维护复杂的设定信息，也不需要长期上下文和写作流程管理
+~~~powershell
+cd mobile-rn
+npm ci
+npm run models:download
+npm run type-check
+powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
+~~~
 
+模型下载脚本会校验两个 GGUF 文件的 SHA-256。GGUF、APK、签名文件和 local.properties 不进入 Git 仓库。
 
-## 特性
+Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STORE_PASSWORD`、`OPENFICM_RELEASE_KEY_ALIAS` 和 `OPENFICM_RELEASE_KEY_PASSWORD`。本地开发请使用 `npm run android:apk:debug`，避免误用调试证书发布。
 
-- 🚀**开箱即用**：使用 Docker 或 pip 快速安装，或是直接使用桌面版，无需复杂配置
-- ✒️**专为写作打造**：面向小说写作优化和设计的编辑器，提供便捷、舒适的码字体验
-- 🤝**全面的模型支持**：无缝集成来自多种提供商的模型，或是任何兼容 OpenAI API 的模型
-- 📱**响应式UI**：专为多平台适配设计的界面，在桌面端、移动端和浏览器上享受无缝体验
-- 🧩**定制化工作流**：高度可配置的 Agent 系统，自由的修改任何 Prompt，构建属于你的工作流
-- 🤖**人机协同创作**：与 Agent 深度集成的辅助创作，发散思维、构建情节、协同编辑，而非抽卡式的一键生成
-- 💾**本地持久化**：所有项目数据均保存在本地，零云存储依赖，确保隐私数据安全
-- 🧠**语义化检索**：基于向量的 Agentic RAG，让 Agent 能够在百万字级别的项目中高效检索过往信息
-- ⚖️**成本优先**：多层上下文管理，智能压缩、动态截断、稳定缓存，尽可能降低使用成本
+密钥轮换时除 `OPENFICM_RELEASE_LINEAGE_FILE` 外，还必须提供旧签名者的
+`OPENFICM_RELEASE_LEGACY_STORE_FILE`、`OPENFICM_RELEASE_LEGACY_STORE_PASSWORD`、
+`OPENFICM_RELEASE_LEGACY_KEY_ALIAS` 和 `OPENFICM_RELEASE_LEGACY_KEY_PASSWORD`。
+构建脚本会用 lineage 中的旧、新签名者写入并验证签名继承链；没有旧签名者配置时应取消设置 lineage 变量。官方签名私钥和轮换链不会提交到仓库。
 
+APK 输出位置：
 
-## 快速开始
+~~~text
+OpenFicM-Android-0.5.0.apk
+~~~
 
-### 🐳 Docker（推荐）
+## 目录
 
-如果使用容器方式安装进行自托管是推荐的安装方式。
+- mobile-rn：OpenFicM Android 应用
+- backend、frontend、desktop：保留的 OpenFic 上游源码与兼容修复，便于追踪来源
+- THIRD_PARTY_NOTICES.md：第三方项目、内容和模型声明
 
-```bash
-docker run -d -p 8000:8000 -v "openfic:/data" --name openfic ghcr.io/syrizelink/openfic:latest
-```
+## 鸣谢
 
-
-### 🐍 Python pip
-
-> [!Warning]  
-> 在开始前，确保你已经安装了Python3.12+
-
-#### 1. 安装OpenFic
-
-```bash
-pip install openfic
-```
-
-#### 2. 启动服务
-
-```bash
-openfic serve
-```
-
-
-### 🖥桌面应用
-
-前往 [Release Page](https://github.com/syrizelink/OpenFic/releases) 下载桌面应用，在你的系统上原生运行，而无需额外步骤。
-
-## 贡献
-
-欢迎提交任何形式的贡献！如果你有想法、建议或代码改进，欢迎提交 Issue 或 Pull Request。
-
-- **报告 Bug**：如果你发现了任何问题，请在 Issues 中描述详细情况
-- **提出功能需求**：有更好的功能想法？在 Issues 中分享你的需求
-- **提交代码**：Fork 本仓库，修改代码后提交 Pull Request
-
-查看 [CONTRIBUTING.md](./CONTRIBUTING.md) 获取详细的贡献指南。
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=syrizelink%2FOpenFic&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=syrizelink/OpenFic&type=date&theme=dark&legend=top-left&sealed_token=JHQpP1A05gPA9RleC2GLLnXJ5mg_nQHq_VosoaeQPU2yPGneRUJNEyxaEy--2atezknlCUb5HxLE0HB31gJAOr1ezJZHYW92VUSlWh0Ej0bkt4Q3AWVUHQ" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=syrizelink/OpenFic&type=date&legend=top-left&sealed_token=JHQpP1A05gPA9RleC2GLLnXJ5mg_nQHq_VosoaeQPU2yPGneRUJNEyxaEy--2atezknlCUb5HxLE0HB31gJAOr1ezJZHYW92VUSlWh0Ej0bkt4Q3AWVUHQ" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=syrizelink/OpenFic&type=date&legend=top-left&sealed_token=JHQpP1A05gPA9RleC2GLLnXJ5mg_nQHq_VosoaeQPU2yPGneRUJNEyxaEy--2atezknlCUb5HxLE0HB31gJAOr1ezJZHYW92VUSlWh0Ej0bkt4Q3AWVUHQ" />
- </picture>
-</a>
-
-## Repobeats
-
-![Repobeats](https://repobeats.axiom.co/api/embed/a3b67d74bb71044ef2385d65bc469090ee3e0fe6.svg "Repobeats analytics image")
-
-## 致谢
-
-- [SillyTavern](https://github.com/SillyTavern/SillyTavern) - 灵感来源
-- [oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode) - 内置写作Skill参考
-
-## 社区
-
-[LINUX DO](https://linux.do/)
-
+- [syrizelink/OpenFic](https://github.com/syrizelink/OpenFic)：原项目、产品设计和桌面端 Agent 体系，Apache-2.0
+- [worldwonderer/oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode)：写作 Skill 与子智能体内容来源，MIT
+- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) 与 [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base)：本地检索模型
 
 ## 许可证
 
-[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+项目代码按 Apache License 2.0 发布。第三方内容继续适用各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
