@@ -68,6 +68,10 @@ OpenFicM-Android-0.5.0.apk
 - [worldwonderer/oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode)：写作 Skill 与子智能体内容来源，MIT
 - [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) 与 [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base)：本地检索模型
 
+## 社区
+
+- [Linux Do](https://linux.do)
+
 ## 许可证
 
 项目代码按 Apache License 2.0 发布。第三方内容继续适用各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
