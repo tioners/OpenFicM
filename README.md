@@ -8,8 +8,7 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 
 前往 [GitHub Releases](https://github.com/tioners/OpenFicM/releases) 下载 APK。
 
-- 当前稳定版：0.5.0
-- 当前测试版：0.6.0-test（使用公开调试证书签名，不能直接覆盖正式签名版本）
+- 当前版本：0.6.0
 - Android 9.0 及以上
 - 仅提供 arm64-v8a，适用于主流 64 位 Android 手机
 - 官方 APK 当前签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
@@ -57,8 +56,6 @@ APK 输出位置：
 ~~~text
 OpenFicM-Android-<version>.apk
 ~~~
-
-GitHub 上标记为 `test` 的 APK 使用仓库内公开调试证书，仅用于功能测试。它与正式 APK 不能互相覆盖安装；卸载应用会清除本地作品数据，请先自行导出需要保留的内容。
 
 ## 目录
 

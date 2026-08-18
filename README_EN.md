@@ -8,8 +8,7 @@ This is an independently maintained derivative project, not an official OpenFic 
 
 Download the APK from [GitHub Releases](https://github.com/tioners/OpenFicM/releases).
 
-- Current stable version: 0.5.0
-- Current test version: 0.6.0-test (signed with the public debug certificate and cannot replace an officially signed build)
+- Current version: 0.6.0
 - Android 9.0 or newer
 - arm64-v8a only
 - Official APK certificate SHA-256: c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
@@ -46,8 +45,6 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 The model downloader verifies both GGUF files by SHA-256. GGUF files, APKs, signing keys, and local.properties are excluded from Git.
 
 Release builds require all four `OPENFICM_RELEASE_STORE_FILE`, `OPENFICM_RELEASE_STORE_PASSWORD`, `OPENFICM_RELEASE_KEY_ALIAS`, and `OPENFICM_RELEASE_KEY_PASSWORD` variables. Use `npm run android:apk:debug` for local development. The official OpenFicM signing key is not published.
-
-GitHub APKs marked as `test` use the public debug certificate and are only intended for functional testing. They cannot replace an officially signed APK. Uninstalling the app deletes its local project data, so export anything that must be retained first.
 
 ## Credits
 
