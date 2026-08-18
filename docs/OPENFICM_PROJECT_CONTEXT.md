@@ -22,7 +22,8 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：5fbf10d feat(mobile): add export and recoverable editing
+- 最新源码提交：992b082 docs: add OpenFicM project handoff context
+- 最近功能提交：5fbf10d feat(mobile): add export and recoverable editing
 - Release 标签：v0.6.0
 - Android applicationId：com.openfic.mobile
 - versionCode：6
