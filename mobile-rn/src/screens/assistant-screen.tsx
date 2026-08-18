@@ -22,6 +22,7 @@ import {
   addMessage,
   createChatSession,
   deleteChatSession,
+  deleteMessagesFrom,
   getProject,
   getProviderApiKey,
   getSetting,
@@ -88,6 +89,13 @@ async function resolveSelection(
   return { provider, model, apiKey };
 }
 
+type RetryRequest = {
+  sessionId: string;
+  userMessage: ChatMessage;
+  history: ChatMessage[];
+  failedMessageId: string | null;
+};
+
 export function AssistantScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const projectId = useAppStore((state) => state.currentProjectId);
@@ -110,7 +118,10 @@ export function AssistantScreen() {
   const [modelPickerVisible, setModelPickerVisible] = useState(false);
   const [liveTrace, setLiveTrace] = useState<AgentRunTrace | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<AgentClarificationRequest | null>(null);
+  const [retryRequest, setRetryRequest] = useState<RetryRequest | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const composerRef = useRef<TextInput>(null);
   const loadRequestRef = useRef(0);
   const sendRequestRef = useRef(0);
   const questionResolverRef = useRef<((response: AgentClarificationResponse) => void) | null>(null);
@@ -210,6 +221,11 @@ export function AssistantScreen() {
     };
   }, [cancelPendingQuestion, projectId]);
 
+  useEffect(() => {
+    setInput("");
+    setEditingMessageId(null);
+    setRetryRequest(null);
+  }, [activeSession?.id]);
   useFocusEffect(useCallback(() => {
     void load();
     return () => {
@@ -312,6 +328,20 @@ export function AssistantScreen() {
     ]);
   };
 
+  const beginEditMessage = (message: ChatMessage) => {
+    if (sending || message.role !== "user") return;
+    setError(null);
+    setRetryRequest(null);
+    setEditingMessageId(message.id);
+    setInput(message.content);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const cancelMessageEdit = () => {
+    setEditingMessageId(null);
+    setInput("");
+  };
+
   const askUser = useCallback((request: AgentClarificationRequest) => new Promise<AgentClarificationResponse>((resolve) => {
     questionResolverRef.current?.({ answers: [], cancelled: true });
     questionResolverRef.current = resolve;
@@ -325,9 +355,17 @@ export function AssistantScreen() {
     resolver?.(response);
   };
 
-  const send = async () => {
-    const content = input.trim();
+  const send = async (retry: RetryRequest | null = null) => {
+    const content = retry?.userMessage.content ?? input.trim();
+    const editTarget = !retry && editingMessageId
+      ? messages.find((message) => message.id === editingMessageId && message.role === "user") ?? null
+      : null;
     if (!project || !activeSession || !selection || !content || sending) return;
+    if (retry && (retry.sessionId !== activeSession.id || !messages.some((message) => message.id === retry.userMessage.id))) {
+      setRetryRequest(null);
+      setError("重试消息已不在当前对话中，请重新发送");
+      return;
+    }
     const sessionId = activeSession.id;
     const requestId = sendRequestRef.current + 1;
     sendRequestRef.current = requestId;
@@ -336,21 +374,46 @@ export function AssistantScreen() {
     setError(null);
     setInput("");
     setLiveTrace(null);
-    let userMessageSaved = false;
+    let userMessage = retry?.userMessage ?? null;
+    let nextHistory = retry?.history ?? [];
+    let userMessageSaved = Boolean(userMessage);
+    let workingSession = activeSession;
     let latestTrace: AgentRunTrace | null = null;
     try {
-      const userMessage = await addMessage(sessionId, "user", content);
-      userMessageSaved = true;
-      const nextHistory = [...messages, userMessage];
-      if (!isCurrentRequest()) return;
-      setMessages(nextHistory);
-      const updatedSession = {
-        ...activeSession,
-        title: activeSession.title === "新对话" ? generatedSessionTitle(content) : activeSession.title,
-        updatedAt: userMessage.createdAt,
-      };
-      setActiveSession(updatedSession);
-      setSessions((current) => [updatedSession, ...current.filter((session) => session.id !== updatedSession.id)]);
+      if (retry?.failedMessageId) {
+        await deleteMessagesFrom(sessionId, retry.failedMessageId);
+        if (!isCurrentRequest()) return;
+        setMessages((current) => current.filter((message) => message.id !== retry.failedMessageId));
+      }
+      if (!retry) {
+        let baseHistory = messages;
+        if (editTarget) {
+          const editIndex = messages.findIndex((message) => message.id === editTarget.id);
+          if (editIndex < 0) throw new Error("要编辑的消息不存在");
+          await deleteMessagesFrom(sessionId, editTarget.id);
+          baseHistory = messages.slice(0, editIndex);
+          setMessages(baseHistory);
+          setEditingMessageId(null);
+          if (editIndex === 0) {
+            workingSession = await updateChatSession({ id: activeSession.id, title: generatedSessionTitle(content) });
+            setActiveSession(workingSession);
+            setSessions((current) => current.map((session) => session.id === workingSession.id ? workingSession : session));
+          }
+        }
+        userMessage = await addMessage(sessionId, "user", content);
+        userMessageSaved = true;
+        nextHistory = [...baseHistory, userMessage];
+        if (!isCurrentRequest()) return;
+        setMessages(nextHistory);
+        const updatedSession = {
+          ...workingSession,
+          title: workingSession.title === "新对话" ? generatedSessionTitle(content) : workingSession.title,
+          updatedAt: userMessage.createdAt,
+        };
+        setActiveSession(updatedSession);
+        setSessions((current) => [updatedSession, ...current.filter((session) => session.id !== updatedSession.id)]);
+      }
+      if (!userMessage) throw new Error("消息准备失败，请重试");
       const response = await runAgent({
         project,
         selection,
@@ -365,7 +428,11 @@ export function AssistantScreen() {
       });
       const assistantMessage = await addMessage(sessionId, "assistant", response.content, { agentTrace: response.trace });
       if (!isCurrentRequest()) return;
-      setMessages((current) => [...current, assistantMessage]);
+      setMessages((current) => [
+        ...current.filter((message) => message.id !== retry?.failedMessageId),
+        assistantMessage,
+      ]);
+      setRetryRequest(null);
       setLiveTrace(null);
       refreshData();
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -373,30 +440,31 @@ export function AssistantScreen() {
       const errorMessage = sendError instanceof Error ? sendError.message : String(sendError);
       if (isCurrentRequest()) setError(errorMessage);
       const failedTrace = sendError instanceof AgentRunError ? sendError.trace : latestTrace;
-      if (userMessageSaved && failedTrace) {
+      if (userMessageSaved && userMessage) {
         try {
           const failedMessage = await addMessage(
             sessionId,
             "assistant",
             "任务未完成：" + errorMessage,
-            { agentTrace: failedTrace },
+            failedTrace ? { agentTrace: failedTrace } : null,
           );
           if (isCurrentRequest()) {
             setMessages((current) => [...current, failedMessage]);
+            setRetryRequest({ sessionId, userMessage, history: nextHistory, failedMessageId: failedMessage.id });
             refreshData();
           }
         } catch {
+          if (isCurrentRequest()) setRetryRequest({ sessionId, userMessage, history: nextHistory, failedMessageId: null });
         }
       }
       if (isCurrentRequest()) {
         setLiveTrace(null);
-        if (!userMessageSaved) setInput(content);
+        setInput(content);
       }
     } finally {
       if (isCurrentRequest()) setSending(false);
     }
   };
-
   if (!projectId) return <Screen><EmptyState title="请先从书架选择一部作品" /></Screen>;
   if (loading) return <Screen><Header title="创作助手" /><View style={styles.loading}><ActivityIndicator color={colors.primary} /></View></Screen>;
 
@@ -461,32 +529,54 @@ export function AssistantScreen() {
           )}
           renderItem={({ item }) => (
             <View style={[styles.message, item.role === "user" ? styles.userMessage : styles.assistantMessage]}>
-              <Text style={styles.messageRole}>{item.role === "user" ? "你" : "OpenFicM"}</Text>
+              <View style={styles.messageHeader}>
+                <Text style={styles.messageRole}>{item.role === "user" ? "你" : "OpenFicM"}</Text>
+                {item.role === "user" ? (
+                  <Pressable accessibilityLabel="编辑这条消息" disabled={sending} onPress={() => beginEditMessage(item)} style={styles.messageEditButton}>
+                    <Ionicons name="create-outline" size={17} color={colors.primary} />
+                    <Text style={styles.messageEditText}>编辑</Text>
+                  </Pressable>
+                ) : null}
+              </View>
               {item.metadata?.agentTrace ? <AgentTraceView trace={item.metadata.agentTrace} /> : null}
               <Text selectable style={styles.messageText}>{item.content}</Text>
             </View>
           )}
         />
-        {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={() => void load()} /></View> : null}
+        {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={retryRequest ? () => void send(retryRequest) : () => void load()} /></View> : null}
         <View style={styles.composer}>
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            style={styles.composerInput}
-            placeholder="输入创作任务"
-            placeholderTextColor={colors.textMuted}
-            editable={!sending}
-            multiline
-            maxLength={12000}
-          />
-          <Pressable
-            accessibilityLabel="发送"
-            disabled={!selection || !input.trim() || sending}
-            onPress={() => void send()}
-            style={({ pressed }) => [styles.sendButton, (pressed || !selection || !input.trim()) && styles.sendDisabled]}
-          >
-            {sending ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
-          </Pressable>
+          {editingMessageId ? (
+            <View style={styles.editingBanner}>
+              <View style={styles.editingCopy}>
+                <Ionicons name="create-outline" size={17} color={colors.primary} />
+                <Text style={styles.editingText}>正在编辑之前的发言</Text>
+              </View>
+              <Pressable accessibilityLabel="取消编辑" onPress={cancelMessageEdit} style={styles.iconButton}>
+                <Ionicons name="close" size={20} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          ) : null}
+          <View style={styles.composerRow}>
+            <TextInput
+              ref={composerRef}
+              value={input}
+              onChangeText={setInput}
+              style={styles.composerInput}
+              placeholder={editingMessageId ? "修改后重新发送" : "输入创作任务"}
+              placeholderTextColor={colors.textMuted}
+              editable={!sending}
+              multiline
+              maxLength={12000}
+            />
+            <Pressable
+              accessibilityLabel={editingMessageId ? "重发编辑后的消息" : "发送"}
+              disabled={!selection || !input.trim() || sending}
+              onPress={() => void send(retryRequest && input.trim() === retryRequest.userMessage.content ? retryRequest : null)}
+              style={({ pressed }) => [styles.sendButton, (pressed || !selection || !input.trim()) && styles.sendDisabled]}
+            >
+              {sending ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -627,11 +717,18 @@ const styles = StyleSheet.create({
   liveTrace: { marginTop: spacing.md },
   emptyMessages: { flexGrow: 1 },
   message: { gap: spacing.md, paddingVertical: spacing.md },
+  messageHeader: { minHeight: 28, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  messageEditButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm },
+  messageEditText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   userMessage: { marginLeft: 42, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
   assistantMessage: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   messageRole: { color: colors.primary, fontSize: 12, fontWeight: "700" },
   messageText: { color: colors.text, fontSize: 16, lineHeight: 24 },
-  composer: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
+  composer: { gap: spacing.xs, padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
+  composerRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
+  editingBanner: { minHeight: 36, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  editingCopy: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  editingText: { color: colors.primary, fontSize: 13, fontWeight: "600" },
   composerInput: { flex: 1, maxHeight: 130, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: 11, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, color: colors.text, fontSize: 16 },
   sendButton: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
   sendDisabled: { opacity: 0.48 },

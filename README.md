@@ -8,7 +8,8 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 
 前往 [GitHub Releases](https://github.com/tioners/OpenFicM/releases) 下载 APK。
 
-- 当前版本：0.5.0
+- 当前稳定版：0.5.0
+- 当前测试版：0.6.0-test（使用公开调试证书签名，不能直接覆盖正式签名版本）
 - Android 9.0 及以上
 - 仅提供 arm64-v8a，适用于主流 64 位 Android 手机
 - 官方 APK 当前签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
@@ -16,8 +17,9 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 ## 功能
 
 - 本地书架、卷分类、章节新建、命名、重命名和删除
-- 手机端章节编辑、自动保存、后台保存和输入法避让
-- 作品隔离的助手会话、模型切换和聊天记录管理
+- 章节、当前卷或整本小说导出为 Markdown
+- 默认章节预览、按需编辑、自动保存、后台保存和输入法避让
+- 作品隔离的助手会话、模型切换、聊天记录管理、失败重试和历史发言编辑
 - 本地角色库、世界书、全文搜索、语义索引和重排
 - 自定义 OpenAI-compatible、Google Gemini 和 Anthropic 供应商
 - 从供应商 API 获取模型列表
@@ -53,8 +55,10 @@ Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STO
 APK 输出位置：
 
 ~~~text
-OpenFicM-Android-0.5.0.apk
+OpenFicM-Android-<version>.apk
 ~~~
+
+GitHub 上标记为 `test` 的 APK 使用仓库内公开调试证书，仅用于功能测试。它与正式 APK 不能互相覆盖安装；卸载应用会清除本地作品数据，请先自行导出需要保留的内容。
 
 ## 目录
 

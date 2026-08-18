@@ -582,6 +582,28 @@ export async function listMessages(sessionId: string): Promise<ChatMessage[]> {
   )).map(mapMessage);
 }
 
+export async function deleteMessagesFrom(sessionId: string, messageId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const target = await txn.getFirstAsync<{ rowid: number }>(
+      "SELECT rowid FROM chat_messages WHERE session_id = ? AND id = ?",
+      sessionId,
+      messageId,
+    );
+    if (!target) throw new Error("要编辑的消息不存在");
+    await txn.runAsync(
+      "DELETE FROM chat_messages WHERE session_id = ? AND rowid >= ?",
+      sessionId,
+      target.rowid,
+    );
+    await txn.runAsync(
+      "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+      new Date().toISOString(),
+      sessionId,
+    );
+  });
+}
+
 export async function addMessage(
   sessionId: string,
   role: ChatMessage["role"],
