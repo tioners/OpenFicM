@@ -1,39 +1,17 @@
-import { Asset } from "expo-asset";
 import { initLlama, type LlamaContext } from "llama.rn";
-
-const EMBEDDING_ASSET = require("../../assets/models/bge-small-zh-v1.5-q4_k_m.gguf");
-const RERANK_ASSET = require("../../assets/models/bge-reranker-base-q4_k_m.gguf");
+import { getLocalModelFile, LOCAL_MODEL_INFO } from "@/settings/remote-resources";
 
 const QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章：";
 const MAX_MODEL_INPUT_CHARACTERS = 440;
 
-export const LOCAL_MODEL_INFO = {
-  embedding: {
-    name: "BGE small zh v1.5 Q4_K_M",
-    bytes: 15_448_256,
-    sha256: "0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8",
-  },
-  rerank: {
-    name: "BGE reranker base Q4_K_M",
-    bytes: 219_068_480,
-    sha256: "18a10177d2494696616d252d55d42dc1046efe8b6b005aa911b5c167dc731f1c",
-  },
-} as const;
-
 let embeddingContextPromise: Promise<LlamaContext> | null = null;
 let rerankContextPromise: Promise<LlamaContext> | null = null;
 
-async function resolvePackagedAsset(moduleId: number): Promise<string> {
-  const asset = Asset.fromModule(moduleId);
-  await asset.downloadAsync();
-  const path = asset.localUri ?? asset.uri;
-  if (!path?.startsWith("file:")) throw new Error("无法读取 APK 内置模型资产");
-  return path;
-}
-
 function createEmbeddingContext(): Promise<LlamaContext> {
-  return resolvePackagedAsset(EMBEDDING_ASSET).then((model) => initLlama({
-    model,
+  const model = getLocalModelFile("embedding");
+  if (!model.exists || model.size !== LOCAL_MODEL_INFO.embedding.bytes) throw new Error("嵌入模型尚未下载或文件不完整，请先在启动提示中一键拉取");
+  return Promise.resolve(initLlama({
+    model: model.uri,
     embedding: true,
     pooling_type: "cls",
     n_ctx: 512,
@@ -45,8 +23,10 @@ function createEmbeddingContext(): Promise<LlamaContext> {
 }
 
 function createRerankContext(): Promise<LlamaContext> {
-  return resolvePackagedAsset(RERANK_ASSET).then((model) => initLlama({
-    model,
+  const model = getLocalModelFile("rerank");
+  if (!model.exists || model.size !== LOCAL_MODEL_INFO.rerank.bytes) throw new Error("重排模型尚未下载或文件不完整，请先在启动提示中一键拉取");
+  return Promise.resolve(initLlama({
+    model: model.uri,
     embedding: true,
     pooling_type: "rank",
     n_ctx: 512,

@@ -105,9 +105,13 @@ function TraceEventRow({ event }: { event: AgentTraceEvent }) {
 export function AgentTraceView({
   trace,
   defaultExpanded = false,
+  onRetry,
+  retryDisabled = false,
 }: {
   trace: AgentRunTrace;
   defaultExpanded?: boolean;
+  onRetry?: () => void;
+  retryDisabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded || trace.status === "running");
   const status = runStatus(trace);
@@ -150,6 +154,21 @@ export function AgentTraceView({
           <Text style={styles.traceSummary} numberOfLines={1}>{trace.primaryAgentName} · {summary}</Text>
         </View>
         {trace.status === "running" ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+        {trace.status === "error" && onRetry ? (
+          <Pressable
+            accessibilityLabel="重试失败任务"
+            accessibilityRole="button"
+            disabled={retryDisabled}
+            onPress={(event) => {
+              event.stopPropagation();
+              onRetry();
+            }}
+            style={[styles.traceRetry, retryDisabled && styles.traceRetryDisabled]}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.danger} />
+            <Text style={styles.traceRetryText}>{retryDisabled ? "处理中" : "重试"}</Text>
+          </Pressable>
+        ) : null}
         <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
       </Pressable>
       {expanded ? (
@@ -322,6 +341,9 @@ const styles = StyleSheet.create({
   traceCopy: { flex: 1, minWidth: 0 },
   traceStatus: { fontSize: 13, fontWeight: "700" },
   traceSummary: { marginTop: 2, color: colors.textMuted, fontSize: 12 },
+  traceRetry: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.danger, borderRadius: radius.sm },
+  traceRetryDisabled: { opacity: 0.5 },
+  traceRetryText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
   events: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   collaborationNotice: {
     minHeight: 38,

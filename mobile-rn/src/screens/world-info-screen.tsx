@@ -19,22 +19,26 @@ import { Button, EmptyState, ErrorNotice, Field, Header, Screen } from "@/compon
 import {
   deleteWorldInfoEntry,
   getOrCreateWorldInfo,
+  getProject,
   listWorldInfoEntries,
   saveWorldInfo,
   saveWorldInfoEntry,
 } from "@/data/repositories";
+import { exportWorldInfo, type LibraryExportFormat } from "@/lib/export";
 import type { RootStackParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
-import type { WorldInfo, WorldInfoEntry } from "@/types";
+import type { Project, WorldInfo, WorldInfoEntry } from "@/types";
 
 export function WorldInfoScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useAppStore((state) => state.currentProjectId);
+  const [project, setProject] = useState<Project | null>(null);
   const [worldInfo, setWorldInfo] = useState<WorldInfo | null>(null);
   const [entries, setEntries] = useState<WorldInfoEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bookName, setBookName] = useState("");
   const [bookDescription, setBookDescription] = useState("");
@@ -46,6 +50,7 @@ export function WorldInfoScreen() {
 
   const load = useCallback(async () => {
     if (!projectId) {
+      setProject(null);
       setWorldInfo(null);
       setEntries([]);
       setLoading(false);
@@ -54,7 +59,9 @@ export function WorldInfoScreen() {
     setLoading(true);
     setError(null);
     try {
-      const nextWorldInfo = await getOrCreateWorldInfo(projectId);
+      const [nextProject, nextWorldInfo] = await Promise.all([getProject(projectId), getOrCreateWorldInfo(projectId)]);
+      if (!nextProject) throw new Error("作品不存在");
+      setProject(nextProject);
       setWorldInfo(nextWorldInfo);
       setBookName(nextWorldInfo.name);
       setBookDescription(nextWorldInfo.description);
@@ -127,6 +134,27 @@ export function WorldInfoScreen() {
     ]);
   };
 
+  const runExport = async (items: WorldInfoEntry[], format: LibraryExportFormat) => {
+    if (!project || !worldInfo || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      await exportWorldInfo(project, worldInfo, items, format);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : String(exportError));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const chooseExport = (items: WorldInfoEntry[], title: string) => {
+    Alert.alert(title, "选择导出格式", [
+      { text: "取消", style: "cancel" },
+      { text: "JSON", onPress: () => void runExport(items, "json") },
+      { text: "Markdown", onPress: () => void runExport(items, "markdown") },
+    ]);
+  };
+
   if (!projectId) return <Screen><Header title="世界书" onBack={() => navigation.goBack()} /><EmptyState title="请先从书架打开一部作品" /></Screen>;
 
   return (
@@ -134,7 +162,14 @@ export function WorldInfoScreen() {
       <Header
         title="世界书"
         onBack={() => navigation.goBack()}
-        action={<Pressable accessibilityLabel="新建世界书条目" onPress={() => openEntryEditor()} style={styles.iconButton}><Ionicons name="add" size={26} color={colors.primary} /></Pressable>}
+        action={(
+          <View style={styles.headerActions}>
+            <Pressable accessibilityLabel="批量导出世界书" disabled={exporting || !entries.length} onPress={() => chooseExport(entries, "导出全部世界书条目")} style={styles.iconButton}>
+              {exporting ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="download-outline" size={22} color={entries.length ? colors.primary : colors.textMuted} />}
+            </Pressable>
+            <Pressable accessibilityLabel="新建世界书条目" onPress={() => openEntryEditor()} style={styles.iconButton}><Ionicons name="add" size={26} color={colors.primary} /></Pressable>
+          </View>
+        )}
       />
       {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={() => void load()} /></View> : null}
       {loading || !worldInfo ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View> : (
@@ -169,9 +204,14 @@ export function WorldInfoScreen() {
                   </View>
                   <Text numberOfLines={2} style={styles.entryContent}>{item.content || "暂无内容"}</Text>
                 </View>
-                <Pressable accessibilityLabel="删除世界书条目" onPress={() => removeEntry(item)} hitSlop={8} style={styles.iconButton}>
-                  <Ionicons name="trash-outline" size={19} color={colors.textMuted} />
-                </Pressable>
+                <View style={styles.rowActions}>
+                  <Pressable accessibilityLabel={`导出世界书条目 ${item.name}`} disabled={exporting} onPress={(event) => { event.stopPropagation(); chooseExport([item], `导出条目“${item.name}”`); }} hitSlop={8} style={styles.iconButton}>
+                    <Ionicons name="download-outline" size={19} color={colors.textMuted} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="删除世界书条目" onPress={(event) => { event.stopPropagation(); removeEntry(item); }} hitSlop={8} style={styles.iconButton}>
+                    <Ionicons name="trash-outline" size={19} color={colors.textMuted} />
+                  </Pressable>
+                </View>
               </Pressable>
             )}
           />
@@ -214,6 +254,7 @@ export function WorldInfoScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  headerActions: { flexDirection: "row", alignItems: "center" },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   errorWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -227,6 +268,7 @@ const styles = StyleSheet.create({
   entryNumber: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
   entryNumberText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   entryText: { flex: 1, minWidth: 0, gap: spacing.xs },
+  rowActions: { flexDirection: "row", alignItems: "center" },
   entryTitleLine: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   entryName: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "700" },
   entryContent: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },

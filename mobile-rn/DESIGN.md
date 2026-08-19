@@ -7,29 +7,28 @@
 - `expo-secure-store` 保存供应商 API Key，SQLite 只保存 SecureStore 引用。
 - `llm/client.ts` 将 OpenAI-compatible、Gemini 和 Anthropic 的请求/响应格式归一为 Agent turn。
 - `agent` 只调用本地仓储工具，不依赖桌面端后端。
-- `search` 使用内置 GGUF 嵌入和重排模型，为章节、角色和世界书建立本地向量索引。
+- `search` 使用首次启动后下载到应用私有目录的 GGUF 嵌入和重排模型，为章节、角色和世界书建立本地向量索引。
 - `settings` 保存索引、上下文、工具权限、规则、技能和智能体配置。
 
 ## 网络边界
 
 应用本身没有本地 HTTP 服务，也没有 Socket.IO 连接。网络请求只由模型客户端发往用户配置的 Base URL。Base URL 和 API Key 都在调用前经过校验；模型响应按 HTTP 状态和 JSON 格式处理，并设置 120 秒超时。
 
-oh-story 内容更新是第二个显式网络入口，只连接 GitHub REST API 与 Raw CDN。应用先读取最新正式 Release，再记录对应的不可变 Git commit/tree SHA；安装仅下载 13 个白名单 Markdown，并限制单文件和整包大小。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
+运行资源下载是显式网络入口：OpenFicM 基础 catalog 从固定 SHA 的 GitHub Raw 文件获取，oh-story 通过正式 Release 获取，Lorn 原版蒸馏 Skill 绑定固定 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`，两个 GGUF 模型从固定 Hugging Face 仓库获取。所有下载都限制大小；模型写入 `.download` 临时文件，完成大小和 SHA-256 校验后才移动到正式路径。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
 
 ## 本地检索
 
 - bge-small-zh-v1.5-q4_k_m.gguf 负责生成中文查询和资料向量。
 - bge-reranker-base-q4_k_m.gguf 对召回候选进行本地重排。
-- 两个模型均通过 llama.rn 在 CPU 上运行，按需加载并可在高级设置中释放。
+- 两个模型均通过 llama.rn 在 CPU 上运行，首次启动资源完整后自动预热加载；高级设置只显示状态和一键修复入口，不再提供手动预热/释放按钮。
 - SQLite 只保存向量分块和来源元数据，索引可单独清除或重建。
 
 ## Android 适配
 
-- 仅构建 arm64-v8a，减少包含两个本地模型后的 APK 体积。
-- GGUF 资源使用 noCompress 打包，避免安装包内二次压缩和大文件解压开销。
+- 仅构建 arm64-v8a；APK 不包含 GGUF、Agent 或 Skill，首次启动按需下载到应用私有目录。
 - softwareKeyboardLayoutMode=resize、Manifest adjustResize 与 react-native-keyboard-controller 共同处理厂商输入法。
 - 长表单使用焦点感知滚动容器；写作和助手页面按键盘高度缩短，底部编辑区域不会被遮挡。
-- Android 原生目录随项目交付并直接构建；修改 app.json、Expo 插件或原生依赖后必须重新运行 prebuild，并复核本地 SDK 路径、Gradle 镜像脚本、ABI、权限和 GGUF noCompress 配置。
+- Android 原生目录随项目交付并直接构建；修改 app.json、Expo 插件或原生依赖后必须重新运行 prebuild，并复核本地 SDK 路径、Gradle 镜像脚本、ABI 和权限。
 
 ## 写作与导出
 
@@ -42,6 +41,22 @@ oh-story 内容更新是第二个显式网络入口，只连接 GitHub REST API 
 - API 调用失败时保留原用户消息和当次历史快照；重试只删除失败提示并重新运行 Agent，不重复插入用户消息。
 - 编辑历史用户消息会在 SQLite 独占事务中删除该条及其后续消息，再保存修改内容并重新运行 Agent，确保线性对话上下文与界面一致。
 - 对话切换会清除仅属于当前界面的编辑和重试状态，避免跨作品或跨会话误操作。
+- 助手完成消息提供复制与重新生成操作；失败消息把状态、友好错误、原始错误和原运行模型/Agent 写入消息 metadata，重进会话后仍可重试。
+
+## Lorn 文风插件
+
+- 插件源码位于仓库根目录 `plugins/lorn-style-evolution`，与内置 catalog 和 oh-story 更新内容隔离。
+- “蒸馏文风”“分析小说文风”“提取文笔DNA”自动激活文风蒸馏 Skill；“更新我的文风”“保存并进化文风”自动激活文风进化 Skill。
+- 作者指南按作品 ID 保存在本机设置中，只在正文写作请求或 narrative-writer 类 Agent 中作为额外 System Prompt 注入。
+- 文风进化优先调用用户配置的插件 FastAPI 地址；未配置时使用当前模型执行相同对比，Android 应用不依赖 Python 服务启动。
+- 插件工具读取、保存或进化指南时继续服从现有工具权限；指南不会写入 oh-story 包，也不会被远程内容更新覆盖。
+- Lorn 原版 Skill 固定到 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`；原仓库根目录未声明 LICENSE，分发和再利用时需遵守上游作者公布的适用条款并自行确认授权。
+
+## 角色与世界书导出
+
+- 角色和世界书支持单条与当前作品全部条目导出，格式为 JSON 或 Markdown。
+- JSON 包含 schema 版本、作品 ID、导出时间和完整数据字段；Markdown 每个条目使用二级标题。
+- 文件名清洗非法字符并写入 Expo cache，再交给 Android 系统分享，不新增外部存储权限。
 
 ## Gemini Schema
 
@@ -87,3 +102,7 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 ### 2026-08-19 - OpenFicM 0.6.0 导出与可恢复编辑
 
 写作页改为预览优先并支持章节、卷、全书 Markdown 导出；助手增加失败请求重试和历史用户消息编辑，编辑点之后的线性上下文通过事务统一重建。
+
+### 2026-08-20 - 文风插件、消息操作与资料导出
+
+新增隔离的 Lorn 文风蒸馏/进化插件、作品级文风指南和正文动态注入；助手补齐复制、重新生成、持久化失败重试与错误详情；角色库和世界书增加 JSON/Markdown 单条与批量导出。

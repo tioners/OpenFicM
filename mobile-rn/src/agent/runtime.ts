@@ -13,6 +13,11 @@ import {
   type ToolPermissionMode,
 } from "@/settings/config";
 import { getProviderApiKey, getSetting, listModels, listProviders, setSetting } from "@/data/repositories";
+import {
+  evolveAuthorStyle,
+  getAuthorStyleGuide,
+  shouldInjectAuthorStyleGuide,
+} from "@/settings/lorn-style-plugin";
 import type {
   AgentClarificationQuestion,
   AgentClarificationRequest,
@@ -53,6 +58,7 @@ type RuntimeCatalog = {
   permissions: Record<string, ToolPermissionMode>;
   historyLimit: number;
   compressSystemPrompts: boolean;
+  authorStyleGuide: string;
 };
 
 type LoopResult = {
@@ -220,6 +226,9 @@ function toolResultDetail(name: string, result: Record<string, unknown>): string
   if (name === "read_chapter") return `已读取章节：${isRecord(result.chapter) ? String(result.chapter.title ?? "") : ""}`.trim();
   if (name === "read_character") return `已读取角色：${isRecord(result.character) ? String(result.character.name ?? "") : ""}`.trim();
   if (name === "read_world_entry") return `已读取世界书：${isRecord(result.entry) ? String(result.entry.name ?? "") : ""}`.trim();
+  if (name === "read_author_style_guide") return result.exists === true ? "已读取作者文风指南" : "当前作品尚无作者文风指南";
+  if (name === "save_author_style_guide") return "已保存作者文风指南";
+  if (name === "evolve_author_style") return `已进化并保存作者文风指南 · ${String(result.source ?? "")}`;
   if (typeof result.title === "string") return `已完成：${result.title}`;
   if (typeof result.name === "string") return `已完成：${result.name}`;
   return result.success === true ? "已完成" : "已返回结果";
@@ -253,8 +262,14 @@ function requiredSkillForRequest(
   agent: AgentDefinition,
   request: string,
 ): AgentSkill | null {
-  if (!requiresAgentCollaboration(request) && !requiresKnowledgeSynchronization(request)) return null;
   const skills = enabledSkillsForAgent(catalog, agent);
+  const lornSkillId = /(更新我的文风|保存并进化文风)/.test(request)
+    ? "plugin-lorn-style--evolution"
+    : /(蒸馏文风|分析小说文风|提取文笔\s*DNA)/i.test(request)
+      ? "plugin-lorn-style--distillation"
+      : null;
+  if (lornSkillId) return skills.find((skill) => skill.id === lornSkillId) ?? null;
+  if (!requiresAgentCollaboration(request) && !requiresKnowledgeSynchronization(request)) return null;
   const preferredIds = /(审查|检查|质量|复盘)/.test(request)
     ? ["builtin-skill--story-quality", "builtin-skill--reader-contract"]
     : /(角色|人物|对白|对话|关系)/.test(request)
@@ -313,6 +328,9 @@ function enabledDelegates(catalog: RuntimeCatalog, agent: AgentDefinition): Agen
 function toolsForAgent(agent: AgentDefinition): AgentToolDefinition[] {
   const allowed = new Set(agent.toolNames.length ? agent.toolNames : agentTools.map((tool) => tool.name));
   allowed.add("ask_user");
+  allowed.add("read_author_style_guide");
+  allowed.add("save_author_style_guide");
+  allowed.add("evolve_author_style");
   if (agent.kind !== "primary") allowed.delete("delegate_agent");
   return agentTools.filter((tool) => allowed.has(tool.name));
 }
@@ -322,6 +340,7 @@ function systemPrompt(input: {
   catalog: RuntimeCatalog;
   agent: AgentDefinition;
   consistencyReason: string | null;
+  userRequest: string;
 }): string {
   const sections = [`你是 OpenFicM 移动端的 ${input.agent.name} 智能体。当前作品是《${input.project.title}》。
 作品简介：${input.project.description || "暂无"}
@@ -337,6 +356,9 @@ function systemPrompt(input: {
   }
   if (input.agent.systemPrompt.trim()) {
     sections.push(`当前智能体定义：\n${input.agent.systemPrompt.trim()}`);
+  }
+  if (input.catalog.authorStyleGuide && shouldInjectAuthorStyleGuide(input.agent, input.userRequest)) {
+    sections.push(`当前作品的《作者专属文风约束指南》：\n${input.catalog.authorStyleGuide}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。`);
   }
   const enabledRules = input.catalog.rules.filter((rule) => rule.enabled && rule.content.trim());
   if (enabledRules.length) {
@@ -418,6 +440,7 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
     catalog: input.catalog,
     agent: input.agent,
     consistencyReason: input.consistencyReason,
+    userRequest: input.userRequest,
   });
   const messages: AgentMessage[] = [
     {
@@ -669,9 +692,22 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
           delegationSucceeded = true;
           result = { agent_id: childAgent.id, agent_name: childAgent.name, result: childResult.content };
           eventDetail = `${childAgent.name} 已返回结果`;
+        } else if (call.name === "evolve_author_style") {
+          const evolved = await evolveAuthorStyle({
+            projectId: input.project.id,
+            aiDraft: requiredArgument(call.arguments, "ai_draft"),
+            authorRevision: requiredArgument(call.arguments, "author_revision"),
+            selection: input.selection,
+          });
+          input.catalog.authorStyleGuide = evolved.guide;
+          result = { success: true, source: evolved.source, guide_characters: evolved.guide.length };
+          eventDetail = toolResultDetail(call.name, result);
         } else {
           result = await executeAgentTool(input.project.id, call.name, call.arguments);
           eventDetail = toolResultDetail(call.name, result);
+          if (call.name === "save_author_style_guide") {
+            input.catalog.authorStyleGuide = requiredArgument(call.arguments, "guide");
+          }
           if (call.name === "write_chapter" || call.name === "edit_chapter") {
             consistencyRequired = true;
             characterConsistencyChecked = false;
@@ -731,12 +767,13 @@ export async function runAgent(input: {
   project: Project;
   selection: ModelSelection;
   history: ChatMessage[];
+  agentId?: string | null;
   approveTool?: ToolApproval;
   askUser?: AskUser;
   onTrace?: TraceListener;
 }): Promise<AgentRunResult> {
   const consistencyKey = `agent.pendingConsistency.${input.project.id}`;
-  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency] = await Promise.all([
+  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, authorStyleGuide] = await Promise.all([
     getAgentRules(),
     getAgentSkills(),
     getAgentDefinitions(),
@@ -745,6 +782,7 @@ export async function runAgent(input: {
     getSetting("context.historyLimit"),
     getSetting("context.compressSystemPrompts"),
     getSetting(consistencyKey),
+    getAuthorStyleGuide(input.project.id),
   ]);
   const parsedHistoryLimit = Number(historyLimitValue);
   const catalog: RuntimeCatalog = {
@@ -756,8 +794,9 @@ export async function runAgent(input: {
       ? parsedHistoryLimit
       : 30,
     compressSystemPrompts: compressValue === "true",
+    authorStyleGuide,
   };
-  const agent = activePrimaryAgent(agents, activeAgentId);
+  const agent = activePrimaryAgent(agents, input.agentId ?? activeAgentId);
   const userRequest = latestUserRequest(input.history);
   const delegates = enabledDelegates(catalog, agent);
   const collaborationRequired = requiresAgentCollaboration(userRequest)

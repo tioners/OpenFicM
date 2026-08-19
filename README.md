@@ -1,6 +1,6 @@
 # OpenFicM
 
-OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 React Native、Expo SQLite 和本地 Agent 运行时，安装后不依赖电脑、FastAPI、Socket.IO 或 Metro；只有调用用户配置的模型 API、获取供应商模型列表或检查 oh-story 内容更新时联网。
+OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 React Native、Expo SQLite 和本地 Agent 运行时，安装后不依赖电脑、FastAPI、Socket.IO 或 Metro。首次启动会按需从 GitHub 拉取 Agent/Skill，从 Hugging Face 拉取本地检索模型；之后还会按用户操作访问模型 API、供应商模型列表和内容更新源。
 
 本项目是独立维护的衍生项目，并非 OpenFic 官方 Android 客户端。
 
@@ -23,9 +23,12 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 - 自定义 OpenAI-compatible、Google Gemini 和 Anthropic 供应商
 - 从供应商 API 获取模型列表
 - 通用、索引、上下文、工具权限、规则、技能、智能体和高级设置
-- PC 内置 Agent/Skill 与 oh-story-claudecode 内容更新、版本校验和回滚
+- 首次启动一键拉取并校验 OpenFicM Agent/Skill、oh-story 内容、Lorn 文风 Skill 和本地检索模型
 - 章节变化后的角色与世界书一致性检查
 - Gemini functionDeclaration 参数 schema 兼容修复
+- Lorn 文风蒸馏与进化插件：作品级作者文风指南、正文动态注入和可选 FastAPI 对比服务
+- 角色库与世界书支持单条或批量导出为 JSON、Markdown
+- 助手完成消息支持复制与重新生成，失败任务支持持久化重试和原始错误详情
 
 API Key 使用 Android SecureStore 保存，不写入 SQLite。作品、章节、角色、世界书和聊天内容默认只保存在手机本地。
 为兼容用户自定义的本地供应商，应用允许 HTTP Base URL；跨网络使用时请优先配置 HTTPS。
@@ -37,12 +40,11 @@ API Key 使用 Android SecureStore 保存，不写入 SQLite。作品、章节�
 ~~~powershell
 cd mobile-rn
 npm ci
-npm run models:download
 npm run type-check
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ~~~
 
-模型下载脚本会校验两个 GGUF 文件的 SHA-256。GGUF、APK、签名文件和 local.properties 不进入 Git 仓库。
+APK 不包含 GGUF、基础 Agent/Skill 或 Lorn Skill。首次启动会显示运行资源清单，用户点击“一键拉取并预热”后，应用将把模型保存到应用私有目录，下载临时文件先校验大小和 SHA-256，再安装到正式路径。基础 Agent/Skill 从 `tioners/OpenFicM` 的 `resources/openficm-agent-catalog.json` 获取，模型来自 Hugging Face；所有固定来源和哈希值见 `mobile-rn/src/settings/remote-resources.ts`。GGUF、APK、签名文件和 local.properties 不进入 Git 仓库。
 
 Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STORE_PASSWORD`、`OPENFICM_RELEASE_KEY_ALIAS` 和 `OPENFICM_RELEASE_KEY_PASSWORD`。本地开发请使用 `npm run android:apk:debug`，避免误用调试证书发布。
 

@@ -1,11 +1,16 @@
 import { getSetting, setSetting } from "@/data/repositories";
 
-import builtinCatalog from "./builtin-catalog.json";
+import {
+  LORN_STYLE_SKILL_IDS,
+  isLornStyleSkillId,
+  shouldAttachLornStyleSkills,
+} from "./lorn-style-plugin";
 import { getInstalledOhStoryPackage } from "./oh-story-updater";
+import { getInstalledLornStylePackage, getInstalledOpenFicMCatalog } from "./remote-resources";
 
 export type ToolPermissionMode = "allow" | "ask" | "deny";
 export type AgentKind = "primary" | "subagent";
-export type CatalogSource = "builtin" | "custom" | "remote";
+export type CatalogSource = "builtin" | "custom" | "plugin" | "remote";
 
 export interface IndexSettings {
   enabled: boolean;
@@ -67,6 +72,7 @@ export const TOOL_CATALOG = [
   { key: "ask_user", name: "向用户提问", readonly: true },
   { key: "activate_skill", name: "激活技能", readonly: true },
   { key: "delegate_agent", name: "委派子智能体", readonly: true },
+  { key: "read_author_style_guide", name: "读取作者文风指南", readonly: true },
   { key: "write_chapter", name: "创建章节", readonly: false },
   { key: "edit_chapter", name: "修改章节", readonly: false },
   { key: "create_character", name: "创建角色", readonly: false },
@@ -75,6 +81,8 @@ export const TOOL_CATALOG = [
   { key: "create_world_entry", name: "创建世界书条目", readonly: false },
   { key: "edit_world_entry", name: "修改世界书条目", readonly: false },
   { key: "delete_world_entry", name: "删除世界书条目", readonly: false },
+  { key: "save_author_style_guide", name: "保存作者文风指南", readonly: false },
+  { key: "evolve_author_style", name: "进化作者文风", readonly: false },
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -169,7 +177,7 @@ function parseSkills(value: unknown): AgentSkill[] {
       description: item.description,
       instructions: item.instructions,
       enabled: item.enabled !== false,
-      source: item.source === "builtin" || item.source === "remote" ? item.source : "custom",
+      source: item.source === "builtin" || item.source === "plugin" || item.source === "remote" ? item.source : "custom",
     }];
   });
 }
@@ -195,7 +203,7 @@ function parseAgents(value: unknown): AgentDefinition[] {
       skillIds: parseStringArray(item.skillIds),
       toolNames: parseStringArray(item.toolNames),
       delegatableAgentIds: parseStringArray(item.delegatableAgentIds),
-      source: item.source === "builtin" || item.source === "remote" ? item.source : "custom",
+      source: item.source === "builtin" || item.source === "plugin" || item.source === "remote" ? item.source : "custom",
     }];
   });
 }
@@ -208,15 +216,23 @@ export async function saveAgentRules(rules: AgentRule[]): Promise<void> {
   await writeJson("agent.rules", rules);
 }
 
-const BUILTIN_SKILLS = parseSkills(builtinCatalog.skills).map((skill) => ({ ...skill, source: "builtin" as const }));
-const BUILTIN_AGENTS = parseAgents(builtinCatalog.agents).map((agent) => ({ ...agent, source: "builtin" as const }));
+function attachPluginSkills(agent: AgentDefinition): AgentDefinition {
+  if (!shouldAttachLornStyleSkills(agent)) return agent;
+  return {
+    ...agent,
+    skillIds: [...new Set([...agent.skillIds, ...LORN_STYLE_SKILL_IDS])],
+  };
+}
 
 export async function getAgentSkills(): Promise<AgentSkill[]> {
-  const [value, remotePackage] = await Promise.all([readJson("agent.skills"), getInstalledOhStoryPackage()]);
+  const [value, openFicMCatalog, lornPackage, remotePackage] = await Promise.all([readJson("agent.skills"), getInstalledOpenFicMCatalog(), getInstalledLornStylePackage(), getInstalledOhStoryPackage()]);
   const records = Array.isArray(value) ? value.filter(isRecord) : [];
   const overrides = new Map(records.filter((item) => typeof item.id === "string").map((item) => [item.id as string, item]));
-  const builtinIds = new Set(BUILTIN_SKILLS.map((skill) => skill.id));
-  const builtins = BUILTIN_SKILLS.map((skill) => {
+  const managedBuiltins = (openFicMCatalog?.skills ?? []).map((skill) => ({ ...skill, source: "builtin" as const }));
+  const builtinIds = new Set(managedBuiltins.map((skill) => skill.id));
+  const pluginSkills = (lornPackage?.skills ?? []).map((skill) => ({ ...skill, source: "plugin" as const }));
+  const pluginIds = new Set(pluginSkills.map((skill) => skill.id));
+  const builtins = managedBuiltins.map((skill) => {
     const override = overrides.get(skill.id);
     return { ...skill, enabled: typeof override?.enabled === "boolean" ? override.enabled : skill.enabled };
   });
@@ -224,26 +240,31 @@ export async function getAgentSkills(): Promise<AgentSkill[]> {
     const override = overrides.get(skill.id);
     return { ...skill, enabled: typeof override?.enabled === "boolean" ? override.enabled : skill.enabled };
   });
-  const managedIds = new Set([...builtinIds, ...remoteSkills.map((skill) => skill.id)]);
+  const plugins = pluginSkills.map((skill) => {
+    const override = overrides.get(skill.id);
+    return { ...skill, enabled: typeof override?.enabled === "boolean" ? override.enabled : skill.enabled };
+  });
+  const managedIds = new Set([...builtinIds, ...pluginIds, ...remoteSkills.map((skill) => skill.id)]);
   const custom = parseSkills(value)
     .filter((skill) => !managedIds.has(skill.id))
     .map((skill) => ({ ...skill, source: "custom" as const }));
-  return [...builtins, ...remoteSkills, ...custom];
+  return [...builtins, ...plugins, ...remoteSkills, ...custom];
 }
 
 export async function saveAgentSkills(skills: AgentSkill[]): Promise<void> {
-  const remotePackage = await getInstalledOhStoryPackage();
-  const managedIds = new Set([...BUILTIN_SKILLS.map((skill) => skill.id), ...(remotePackage?.skills ?? []).map((skill) => skill.id)]);
+  const [openFicMCatalog, lornPackage, remotePackage] = await Promise.all([getInstalledOpenFicMCatalog(), getInstalledLornStylePackage(), getInstalledOhStoryPackage()]);
+  const managedIds = new Set([...(openFicMCatalog?.skills ?? []).map((skill) => skill.id), ...(lornPackage?.skills ?? []).map((skill) => skill.id), ...(remotePackage?.skills ?? []).map((skill) => skill.id)]);
   await writeJson("agent.skills", skills.map((skill) => managedIds.has(skill.id)
     ? { id: skill.id, enabled: skill.enabled }
     : { ...skill, source: "custom" }));
 }
 
 export async function getAgentDefinitions(): Promise<AgentDefinition[]> {
-  const [value, remotePackage] = await Promise.all([readJson("agent.definitions"), getInstalledOhStoryPackage()]);
+  const [value, openFicMCatalog, remotePackage] = await Promise.all([readJson("agent.definitions"), getInstalledOpenFicMCatalog(), getInstalledOhStoryPackage()]);
   const records = Array.isArray(value) ? value.filter(isRecord) : [];
   const overrides = new Map(records.filter((item) => typeof item.id === "string").map((item) => [item.id as string, item]));
-  const builtinIds = new Set(BUILTIN_AGENTS.map((agent) => agent.id));
+  const managedBuiltins = (openFicMCatalog?.agents ?? []).map((agent) => ({ ...agent, source: "builtin" as const }));
+  const builtinIds = new Set(managedBuiltins.map((agent) => agent.id));
   const remoteAgents = (remotePackage?.agents ?? []).map((agent) => {
     const override = overrides.get(agent.id);
     return {
@@ -253,7 +274,7 @@ export async function getAgentDefinitions(): Promise<AgentDefinition[]> {
     };
   });
   const remoteAgentIds = remoteAgents.map((agent) => agent.id);
-  const builtins = BUILTIN_AGENTS.map((agent) => {
+  const builtins = managedBuiltins.map((agent) => {
     const override = overrides.get(agent.id);
     return {
       ...agent,
@@ -268,13 +289,17 @@ export async function getAgentDefinitions(): Promise<AgentDefinition[]> {
   const custom = parseAgents(value)
     .filter((agent) => !managedIds.has(agent.id))
     .map((agent) => ({ ...agent, source: "custom" as const }));
-  return [...builtins, ...remoteAgents, ...custom];
+  return [...builtins, ...remoteAgents, ...custom].map(attachPluginSkills);
 }
 
 export async function saveAgentDefinitions(agents: AgentDefinition[]): Promise<void> {
-  const remotePackage = await getInstalledOhStoryPackage();
-  const managedIds = new Set([...BUILTIN_AGENTS.map((agent) => agent.id), ...(remotePackage?.agents ?? []).map((agent) => agent.id)]);
+  const [openFicMCatalog, remotePackage] = await Promise.all([getInstalledOpenFicMCatalog(), getInstalledOhStoryPackage()]);
+  const managedIds = new Set([...(openFicMCatalog?.agents ?? []).map((agent) => agent.id), ...(remotePackage?.agents ?? []).map((agent) => agent.id)]);
   await writeJson("agent.definitions", agents.map((agent) => managedIds.has(agent.id)
     ? { id: agent.id, enabled: agent.enabled, modelId: agent.modelId }
     : { ...agent, source: "custom" }));
+}
+
+export function isManagedPluginSkill(skill: AgentSkill): boolean {
+  return skill.source === "plugin" && isLornStyleSkillId(skill.id);
 }

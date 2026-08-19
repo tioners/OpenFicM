@@ -17,6 +17,7 @@ import {
 } from "@/data/repositories";
 import type { AgentToolDefinition } from "@/llm/types";
 import { searchProjectKnowledge } from "@/search/indexer";
+import { getAuthorStyleGuide, saveAuthorStyleGuide } from "@/settings/lorn-style-plugin";
 
 export const agentTools: AgentToolDefinition[] = [
   {
@@ -141,6 +142,34 @@ export const agentTools: AgentToolDefinition[] = [
         task: { type: "string", description: "包含目标、上下文、交付物和限制的完整任务" },
       },
       required: ["agent_id", "task"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_author_style_guide",
+    description: "读取当前作品保存的作者专属文风约束指南",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: "save_author_style_guide",
+    description: "保存或替换当前作品的完整作者专属文风约束指南",
+    parameters: {
+      type: "object",
+      properties: { guide: { type: "string", description: "完整 Markdown 文风约束指南" } },
+      required: ["guide"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "evolve_author_style",
+    description: "对比 AI 原稿和作者定稿，通过 Lorn 插件服务或当前模型更新并保存作者文风指南",
+    parameters: {
+      type: "object",
+      properties: {
+        ai_draft: { type: "string", description: "AI 生成的原稿" },
+        author_revision: { type: "string", description: "作者修改后的定稿" },
+      },
+      required: ["ai_draft", "author_revision"],
       additionalProperties: false,
     },
   },
@@ -321,6 +350,15 @@ export async function executeAgentTool(
     const worldInfo = await getOrCreateWorldInfo(projectId);
     if (entry.worldInfoId !== worldInfo.id) throw new Error("未找到世界书条目");
     return { entry };
+  }
+  if (name === "read_author_style_guide") {
+    const guide = await getAuthorStyleGuide(projectId);
+    return { guide, exists: Boolean(guide) };
+  }
+  if (name === "save_author_style_guide") {
+    const guide = requiredString(args, "guide");
+    await saveAuthorStyleGuide(projectId, guide);
+    return { success: true, guide_characters: guide.trim().length };
   }
   if (name === "create_character") {
     const characterName = requiredString(args, "name");

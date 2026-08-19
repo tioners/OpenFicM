@@ -32,11 +32,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Bundled GGUF Models
+## Runtime GGUF Models
 
-The APK bundles these MIT-licensed quantized models:
+The APK does not bundle these models. The app downloads them on demand from Hugging Face after the user starts the resource installation flow:
 
 - [CompendiumLabs/bge-small-zh-v1.5-gguf](https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf), based on BAAI/bge-small-zh-v1.5
 - [sabafallah/bge-reranker-base-Q4_K_M-GGUF](https://huggingface.co/sabafallah/bge-reranker-base-Q4_K_M-GGUF), based on BAAI/bge-reranker-base
 
-Exact filenames and SHA-256 values are recorded in mobile-rn/assets/models/LICENSES.md.
+Exact filenames, sizes and SHA-256 values are recorded in mobile-rn/assets/models/LICENSES.md and mobile-rn/src/settings/remote-resources.ts.
+
+## Lorn.NovelWriteSkills
+
+The optional Lorn style package downloads the “通用-蒸馏作者文风” Skill and a small allowlist of references from [lornshrimp/Lorn.NovelWriteSkills](https://github.com/lornshrimp/Lorn.NovelWriteSkills) at commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`. The upstream repository root did not declare a LICENSE at that commit. The package is user-initiated, is not bundled in the APK, and remains subject to the upstream author's terms; confirm permission before redistribution.

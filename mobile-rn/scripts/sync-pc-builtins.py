@@ -10,7 +10,7 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPOSITORY_ROOT / "backend" / "app" / "skills"
 AGENTS_DIR = REPOSITORY_ROOT / "backend" / "app" / "prompts" / "builtin-agents"
-OUTPUT_PATH = REPOSITORY_ROOT / "mobile-rn" / "src" / "settings" / "builtin-catalog.json"
+OUTPUT_PATH = REPOSITORY_ROOT / "resources" / "openficm-agent-catalog.json"
 MOBILE_AGENT_TEXT_REPLACEMENTS = {
     "来自OpenFic的高级AI Agent": "来自OpenFicM的高级AI Agent",
     "OpenFic是一款原生Agent集成的Vibe Writing工具": "OpenFicM是一款原生Agent集成的Vibe Writing工具",
@@ -202,6 +202,7 @@ def main() -> None:
         "skills": skills,
         "agents": load_agents([skill["id"] for skill in skills]),
     }
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(
         json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

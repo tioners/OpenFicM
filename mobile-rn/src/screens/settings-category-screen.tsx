@@ -39,7 +39,13 @@ import {
   type ToolPermissionMode,
 } from "@/settings/config";
 import { clearProjectIndex, getProjectIndexStats, indexProject } from "@/search/indexer";
-import { getLocalModelStatus, LOCAL_MODEL_INFO, releaseLocalModels, warmUpLocalModels } from "@/search/local-models";
+import { getLocalModelStatus, warmUpLocalModels } from "@/search/local-models";
+import {
+  getRuntimeResourceState,
+  installMissingRuntimeResources,
+  LOCAL_MODEL_INFO,
+  type RuntimeResourceState,
+} from "@/settings/remote-resources";
 import {
   checkOhStoryRelease,
   compareOhStoryVersions,
@@ -51,6 +57,11 @@ import {
 } from "@/settings/oh-story-updater";
 import { colors, radius, spacing } from "@/theme";
 import type { Model } from "@/types";
+import {
+  getAuthorStyleGuide,
+  LORN_STYLE_ENDPOINT_KEY,
+  saveAuthorStyleGuide,
+} from "@/settings/lorn-style-plugin";
 
 export type SettingsCategory =
   | "general"
@@ -58,6 +69,7 @@ export type SettingsCategory =
   | "models"
   | "index"
   | "context"
+  | "style"
   | "agent-tools"
   | "rules"
   | "skills"
@@ -69,6 +81,7 @@ const TITLES: Record<Exclude<SettingsCategory, "models">, string> = {
   connections: "连接",
   index: "索引",
   context: "上下文",
+  style: "作者文风",
   "agent-tools": "工具权限",
   rules: "规则",
   skills: "技能",
@@ -131,15 +144,20 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const [autoSaveDelay, setAutoSaveDelay] = useState("1000");
   const [editorFontSize, setEditorFontSize] = useState("17");
   const [requestTimeout, setRequestTimeout] = useState("120000");
+  const [authorStyleGuide, setAuthorStyleGuide] = useState("");
+  const [styleEndpoint, setStyleEndpoint] = useState("");
   const [ohStoryState, setOhStoryState] = useState<OhStoryUpdateState>(EMPTY_OH_STORY_STATE);
   const [ohStoryProgress, setOhStoryProgress] = useState("");
   const [ohStoryBusy, setOhStoryBusy] = useState(false);
+  const [resourceState, setResourceState] = useState<RuntimeResourceState | null>(null);
+  const [resourceProgress, setResourceProgress] = useState("");
+  const [resourceBusy, setResourceBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, autoSave, fontSize, timeout, nextModels, nextOhStoryState] = await Promise.all([
+      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, autoSave, fontSize, timeout, nextModels, nextOhStoryState, nextStyleGuide, nextStyleEndpoint, nextResourceState] = await Promise.all([
         getIndexSettings(),
         getAgentRules(),
         getAgentSkills(),
@@ -153,6 +171,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
         getSetting("connections.requestTimeout"),
         listModels(),
         getOhStoryUpdateState(),
+        projectId ? getAuthorStyleGuide(projectId) : Promise.resolve(""),
+        getSetting(LORN_STYLE_ENDPOINT_KEY),
+        getRuntimeResourceState(),
       ]);
       setIndexSettings(nextIndex);
       setRules(nextRules);
@@ -172,6 +193,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       setRequestTimeout(timeout ?? "120000");
       setAvailableModels(nextModels);
       setOhStoryState(nextOhStoryState);
+      setAuthorStyleGuide(nextStyleGuide);
+      setStyleEndpoint(nextStyleEndpoint ?? "");
+      setResourceState(nextResourceState);
       if (projectId) setIndexStats(await getProjectIndexStats(projectId));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -193,6 +217,50 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveStyleGuide = async () => {
+    if (!projectId) {
+      setError("请先从书架打开一部作品");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await Promise.all([
+        saveAuthorStyleGuide(projectId, authorStyleGuide),
+        setSetting(LORN_STYLE_ENDPOINT_KEY, styleEndpoint.trim()),
+      ]);
+      refreshData();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const downloadResources = async () => {
+    setResourceBusy(true);
+    setError(null);
+    setResourceProgress("准备一键拉取运行资源…");
+    try {
+      const next = await installMissingRuntimeResources((item) => {
+        if (item.totalBytes && item.totalBytes > 0 && item.bytesWritten !== undefined) {
+          setResourceProgress(`${item.label} · ${Math.min(100, Math.round(item.bytesWritten / item.totalBytes * 100))}%`);
+        } else {
+          setResourceProgress(item.total > 1 ? `${item.label} · ${item.completed}/${item.total}` : item.label);
+        }
+      });
+      setResourceState(next);
+      setResourceProgress("正在预热本地检索模型…");
+      await warmUpLocalModels();
+      setResourceProgress("全部运行资源已就绪");
+    } catch (resourceError) {
+      setError(resourceError instanceof Error ? resourceError.message : String(resourceError));
+      setResourceState(await getRuntimeResourceState().catch(() => null));
+    } finally {
+      setResourceBusy(false);
     }
   };
 
@@ -479,6 +547,29 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
           }} />
         </View>
       ) : null}
+      {category === "style" ? (
+        <View style={styles.section}>
+          <SettingRow label="当前范围" value={projectId ? "当前书架作品" : "尚未选择作品"} />
+          <Field
+            label="作者专属文风约束指南"
+            value={authorStyleGuide}
+            onChangeText={setAuthorStyleGuide}
+            multiline
+            maxLength={100000}
+            style={styles.styleGuideInput}
+            placeholder="可手动编辑，或在助手中使用“蒸馏文风”“更新我的文风”生成"
+          />
+          <Field
+            label="文风进化服务地址（可选）"
+            value={styleEndpoint}
+            onChangeText={setStyleEndpoint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="例如 http://192.168.1.2:8000；留空使用当前模型"
+          />
+          <Button label="保存文风设置" onPress={() => void saveStyleGuide()} disabled={!projectId || saving} loading={saving} />
+        </View>
+      ) : null}
       {category === "agent-tools" ? (
         <View style={styles.section}>
           <Text style={styles.sectionHint}>点击权限状态循环切换：允许、每次询问、禁止。</Text>
@@ -526,7 +617,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
                 <Text style={styles.settingLabel}>{skill.name}</Text>
                 <Text numberOfLines={2} style={styles.settingValue}>{skill.description || skill.instructions}</Text>
                 <Text style={styles.modelHint}>
-                  {skill.source === "builtin" ? "PC 内置技能" : skill.source === "remote" ? "oh-story 更新技能" : "自定义技能"} · 按需激活
+                  {skill.source === "builtin" ? "OpenFicM 基础包" : skill.source === "plugin" ? "Lorn 文风插件" : skill.source === "remote" ? "oh-story 更新技能" : "自定义技能"} · 按需激活
                 </Text>
               </View>
               <Switch value={skill.enabled} onValueChange={(enabled) => {
@@ -555,7 +646,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
                 <Text style={styles.settingLabel}>{agent.name}</Text>
                 <Text numberOfLines={2} style={styles.settingValue}>{agent.description || agent.systemPrompt}</Text>
                 <Text style={styles.modelHint}>
-                  {agent.source === "builtin" ? "PC 内置" : agent.source === "remote" ? "oh-story 更新" : "自定义"} · {agent.kind === "primary" ? "主智能体" : "子智能体"} · {agent.skillIds.length} 个技能
+                  {agent.source === "builtin" ? "OpenFicM 基础包" : agent.source === "remote" ? "oh-story 更新" : "自定义"} · {agent.kind === "primary" ? "主智能体" : "子智能体"} · {agent.skillIds.length} 个技能
                 </Text>
                 {agent.modelId ? <Text style={styles.modelHint}>{availableModels.find((model) => model.id === agent.modelId)?.name ?? "模型已删除"}</Text> : null}
               </View>
@@ -618,11 +709,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
           <SettingRow label="嵌入模型" value={`${LOCAL_MODEL_INFO.embedding.name} · 约 15 MB`} />
           <SettingRow label="重排模型" value={`${LOCAL_MODEL_INFO.rerank.name} · 约 209 MB`} />
           <SettingRow label="当前加载状态" value={`嵌入：${getLocalModelStatus().embeddingLoaded ? "已加载" : "未加载"} · 重排：${getLocalModelStatus().rerankLoaded ? "已加载" : "未加载"}`} />
-          <Button label="预热本地模型" onPress={() => {
-            setSaving(true);
-            void warmUpLocalModels().catch((warmError) => setError(warmError instanceof Error ? warmError.message : String(warmError))).finally(() => setSaving(false));
-          }} loading={saving} />
-          <Button label="释放本地模型内存" variant="secondary" onPress={() => void releaseLocalModels()} />
+          <SettingRow label="运行资源状态" value={resourceState?.ready ? "完整" : `缺少 ${resourceState?.missing.length ?? "未知"} 项`} />
+          <Button label={resourceBusy ? "拉取中" : "一键拉取缺失资源"} onPress={() => void downloadResources()} disabled={resourceBusy} loading={resourceBusy} />
+          {resourceProgress ? <Text style={styles.progressText}>{resourceProgress}</Text> : null}
           <Button label="清除当前作品索引" variant="secondary" onPress={() => {
             if (!projectId) return;
             Alert.alert("清除索引", "只删除索引，不删除章节、角色和世界书数据。", [
@@ -654,6 +743,7 @@ const styles = StyleSheet.create({
   manageText: { flex: 1, minWidth: 0, gap: spacing.xs },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   multiline: { minHeight: 120 },
+  styleGuideInput: { minHeight: 260 },
   progressText: { color: colors.primary, fontSize: 13 },
   statusText: { color: colors.textMuted, fontSize: 13 },
   modelHint: { color: colors.primary, fontSize: 12 },

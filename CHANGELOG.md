@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Moved Agent/Skill and local retrieval models out of the APK. Added startup resource integrity checks, one-click GitHub/Hugging Face download, temporary-file SHA-256 verification and automatic model warm-up.
+- Added the original Lorn.NovelWriteSkills distillation Skill and allowlisted references, pinned to commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`; the upstream repository root does not declare a license.
+- Added the isolated Lorn style distillation and evolution plugin with per-project style guides and optional FastAPI integration.
+- Added persistent assistant retry actions, message copying, and human-readable network errors with expandable details.
+- Added JSON and Markdown exports for individual or all character and world-info entries.
+
 ## 0.6.0 - 2026-08-19
 
 - 增加当前章节、当前卷和整本小说的 Markdown 导出

@@ -36,6 +36,7 @@ const settingsCategories: Array<{
   { id: "models", label: "模型与供应商", icon: "hardware-chip-outline" },
   { id: "index", label: "索引", icon: "layers-outline" },
   { id: "context", label: "上下文", icon: "document-text-outline" },
+  { id: "style", label: "作者文风", icon: "color-wand-outline" },
   { id: "agent-tools", label: "工具权限", icon: "shield-checkmark-outline" },
   { id: "rules", label: "规则", icon: "list-outline" },
   { id: "skills", label: "技能", icon: "flash-outline" },

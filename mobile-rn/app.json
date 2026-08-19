@@ -51,8 +51,6 @@
         }
       ],
       "expo-font",
-      "expo-asset",
-      "./plugins/with-gguf-assets",
       [
         "llama.rn",
         {

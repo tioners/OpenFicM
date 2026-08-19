@@ -17,6 +17,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { AgentRunError, runAgent } from "@/agent/runtime";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
+import { MessageActionBar } from "@/components/message-action-bar";
 import { Button, EmptyState, ErrorNotice, Header, Screen } from "@/components/ui";
 import {
   addMessage,
@@ -93,8 +94,64 @@ type RetryRequest = {
   sessionId: string;
   userMessage: ChatMessage;
   history: ChatMessage[];
-  failedMessageId: string | null;
+  sourceMessageId: string;
+  modelId: string;
+  agentId: string | null;
 };
+
+function humanizeAgentError(error: unknown): { message: string; detail: string } {
+  const detail = error instanceof Error ? error.message : String(error);
+  const normalized = detail.toLowerCase();
+  if (/sslhandshake|ssl handshake|certificate|connection closed/.test(normalized)) {
+    return { message: "网络连接异常（SSL 握手失败），请检查网络环境或供应商配置后重试", detail };
+  }
+  if (/timeout|timed out|aborterror|请求超时/.test(normalized)) {
+    return { message: "模型请求超时，请检查网络或供应商配置后重试", detail };
+  }
+  if (/fetch failed|network request failed|unable to connect|cannot connect/.test(normalized)) {
+    return { message: "网络连接异常，请检查网络、Base URL 和证书设置后重试", detail };
+  }
+  return { message: detail, detail };
+}
+
+function retryRequestForMessage(
+  message: ChatMessage,
+  messages: ChatMessage[],
+  session: ChatSession | null,
+  selection: ModelSelection | null,
+  agentId: string | null,
+): RetryRequest | null {
+  if (!session || message.role !== "assistant") return null;
+  const messageIndex = messages.findIndex((item) => item.id === message.id);
+  if (messageIndex < 0) return null;
+  const context = message.metadata?.retryContext;
+  const userIndex = context
+    ? messages.findIndex((item) => item.id === context.userMessageId && item.role === "user")
+    : messages.slice(0, messageIndex).map((item) => item.role).lastIndexOf("user");
+  if (userIndex < 0 || userIndex >= messageIndex) return null;
+  const userMessage = messages[userIndex];
+  return {
+    sessionId: session.id,
+    userMessage,
+    history: messages.slice(0, userIndex + 1),
+    sourceMessageId: message.id,
+    modelId: context?.modelId ?? session.modelId ?? selection?.model.id ?? "",
+    agentId: context?.agentId ?? agentId,
+  };
+}
+
+function ErrorDetails({ detail }: { detail: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View style={styles.errorDetails}>
+      <Pressable accessibilityRole="button" onPress={() => setExpanded((value) => !value)} style={styles.errorDetailsToggle}>
+        <Text style={styles.errorDetailsLabel}>原始错误详情</Text>
+        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={15} color={colors.textMuted} />
+      </Pressable>
+      {expanded ? <Text selectable style={styles.errorDetailsText}>{detail}</Text> : null}
+    </View>
+  );
+}
 
 export function AssistantScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
@@ -108,6 +165,7 @@ export function AssistantScreen() {
   const [models, setModels] = useState<Model[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [activeAgentName, setActiveAgentName] = useState("Build");
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [input, setInput] = useState("");
@@ -145,6 +203,7 @@ export function AssistantScreen() {
       setModels([]);
       setProviders([]);
       setDefaultModelId(null);
+      setActiveAgentId(null);
       setActiveAgentName("Build");
       setSelection(null);
       setLiveTrace(null);
@@ -195,9 +254,12 @@ export function AssistantScreen() {
       setSessions(nextSessions);
       setActiveSession(nextSession);
       setMessages(nextMessages);
+      const lastFailed = [...nextMessages].reverse().find((message) => message.role === "assistant" && (message.metadata?.taskStatus === "failed" || message.metadata?.agentTrace?.status === "error"));
+      setRetryRequest(lastFailed ? retryRequestForMessage(lastFailed, nextMessages, nextSession, nextSelection, activeAgent?.id ?? null) : null);
       setModels(nextModels);
       setProviders(nextProviders);
       setDefaultModelId(nextDefaultModelId);
+      setActiveAgentId(activeAgent?.id ?? null);
       setActiveAgentName(activeAgent?.name ?? "Build");
       setSelection(nextSelection);
       setError(selectionError);
@@ -224,7 +286,6 @@ export function AssistantScreen() {
   useEffect(() => {
     setInput("");
     setEditingMessageId(null);
-    setRetryRequest(null);
   }, [activeSession?.id]);
   useFocusEffect(useCallback(() => {
     void load();
@@ -253,6 +314,8 @@ export function AssistantScreen() {
       await setSetting(activeSessionSettingKey(projectId), session.id);
       setActiveSession(session);
       setMessages(nextMessages);
+      const lastFailed = [...nextMessages].reverse().find((message) => message.role === "assistant" && (message.metadata?.taskStatus === "failed" || message.metadata?.agentTrace?.status === "error"));
+      setRetryRequest(lastFailed ? retryRequestForMessage(lastFailed, nextMessages, session, nextSelection, activeAgentId) : null);
       setSelection(nextSelection);
       setError(selectionError);
       setSessionPickerVisible(false);
@@ -271,6 +334,7 @@ export function AssistantScreen() {
       setSessions((current) => [session, ...current]);
       setActiveSession(session);
       setMessages([]);
+      setRetryRequest(null);
       setSessionPickerVisible(false);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError));
@@ -309,6 +373,7 @@ export function AssistantScreen() {
       const nextMessages = await listMessages(replacement.id);
       setActiveSession(replacement);
       setMessages(nextMessages);
+      setRetryRequest(null);
       try {
         setSelection(await resolveSelection(effectiveModelId, models, providers));
         setError(null);
@@ -360,7 +425,7 @@ export function AssistantScreen() {
     const editTarget = !retry && editingMessageId
       ? messages.find((message) => message.id === editingMessageId && message.role === "user") ?? null
       : null;
-    if (!project || !activeSession || !selection || !content || sending) return;
+    if (!project || !activeSession || !content || sending) return;
     if (retry && (retry.sessionId !== activeSession.id || !messages.some((message) => message.id === retry.userMessage.id))) {
       setRetryRequest(null);
       setError("重试消息已不在当前对话中，请重新发送");
@@ -379,11 +444,19 @@ export function AssistantScreen() {
     let userMessageSaved = Boolean(userMessage);
     let workingSession = activeSession;
     let latestTrace: AgentRunTrace | null = null;
+    let runSelection: ModelSelection | null = selection;
     try {
-      if (retry?.failedMessageId) {
-        await deleteMessagesFrom(sessionId, retry.failedMessageId);
+      runSelection = retry?.modelId
+        ? await resolveSelection(retry.modelId, models, providers)
+        : selection;
+      if (!runSelection) throw new Error("请先配置可用模型");
+      if (retry?.sourceMessageId) {
+        await deleteMessagesFrom(sessionId, retry.sourceMessageId);
         if (!isCurrentRequest()) return;
-        setMessages((current) => current.filter((message) => message.id !== retry.failedMessageId));
+        setMessages((current) => {
+          const sourceIndex = current.findIndex((message) => message.id === retry.sourceMessageId);
+          return sourceIndex < 0 ? current : current.slice(0, sourceIndex);
+        });
       }
       if (!retry) {
         let baseHistory = messages;
@@ -416,8 +489,9 @@ export function AssistantScreen() {
       if (!userMessage) throw new Error("消息准备失败，请重试");
       const response = await runAgent({
         project,
-        selection,
+        selection: runSelection,
         history: nextHistory,
+        agentId: retry?.agentId ?? activeAgentId,
         approveTool: requestToolApproval,
         askUser,
         onTrace: (trace) => {
@@ -426,35 +500,47 @@ export function AssistantScreen() {
           requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
         },
       });
-      const assistantMessage = await addMessage(sessionId, "assistant", response.content, { agentTrace: response.trace });
+      const assistantMessage = await addMessage(sessionId, "assistant", response.content, {
+        agentTrace: response.trace,
+        taskStatus: "completed",
+        retryContext: { userMessageId: userMessage.id, modelId: runSelection.model.id, agentId: retry?.agentId ?? activeAgentId },
+      });
       if (!isCurrentRequest()) return;
-      setMessages((current) => [
-        ...current.filter((message) => message.id !== retry?.failedMessageId),
-        assistantMessage,
-      ]);
+      setMessages((current) => {
+        if (!retry) return [...current, assistantMessage];
+        const sourceIndex = current.findIndex((message) => message.id === retry.sourceMessageId);
+        return sourceIndex < 0 ? [...current, assistantMessage] : [...current.slice(0, sourceIndex), assistantMessage];
+      });
       setRetryRequest(null);
       setLiveTrace(null);
       refreshData();
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (sendError) {
-      const errorMessage = sendError instanceof Error ? sendError.message : String(sendError);
-      if (isCurrentRequest()) setError(errorMessage);
+      const friendlyError = humanizeAgentError(sendError);
+      if (isCurrentRequest()) setError(friendlyError.message);
       const failedTrace = sendError instanceof AgentRunError ? sendError.trace : latestTrace;
+      const retryModelId = runSelection?.model.id ?? retry?.modelId ?? activeSession.modelId ?? "";
       if (userMessageSaved && userMessage) {
         try {
           const failedMessage = await addMessage(
             sessionId,
             "assistant",
-            "任务未完成：" + errorMessage,
-            failedTrace ? { agentTrace: failedTrace } : null,
+            "任务未完成：" + friendlyError.message,
+            {
+              agentTrace: failedTrace ?? undefined,
+              taskStatus: "failed",
+              errorMessage: friendlyError.message,
+              errorDetail: friendlyError.detail,
+              retryContext: { userMessageId: userMessage.id, modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId },
+            },
           );
           if (isCurrentRequest()) {
             setMessages((current) => [...current, failedMessage]);
-            setRetryRequest({ sessionId, userMessage, history: nextHistory, failedMessageId: failedMessage.id });
+            setRetryRequest({ sessionId, userMessage, history: nextHistory, sourceMessageId: failedMessage.id, modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId });
             refreshData();
           }
         } catch {
-          if (isCurrentRequest()) setRetryRequest({ sessionId, userMessage, history: nextHistory, failedMessageId: null });
+          if (isCurrentRequest()) setRetryRequest({ sessionId, userMessage, history: nextHistory, sourceMessageId: retry?.sourceMessageId ?? "", modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId });
         }
       }
       if (isCurrentRequest()) {
@@ -529,6 +615,11 @@ export function AssistantScreen() {
           )}
           renderItem={({ item }) => (
             <View style={[styles.message, item.role === "user" ? styles.userMessage : styles.assistantMessage]}>
+              {(() => {
+                const messageRetry = retryRequestForMessage(item, messages, activeSession, selection, activeAgentId);
+                const failed = item.role === "assistant" && (item.metadata?.taskStatus === "failed" || item.metadata?.agentTrace?.status === "error");
+                return (
+                  <>
               <View style={styles.messageHeader}>
                 <Text style={styles.messageRole}>{item.role === "user" ? "你" : "OpenFicM"}</Text>
                 {item.role === "user" ? (
@@ -538,8 +629,31 @@ export function AssistantScreen() {
                   </Pressable>
                 ) : null}
               </View>
-              {item.metadata?.agentTrace ? <AgentTraceView trace={item.metadata.agentTrace} /> : null}
+              {item.metadata?.agentTrace ? (
+                <AgentTraceView
+                  trace={item.metadata.agentTrace}
+                  onRetry={failed && messageRetry ? () => void send(messageRetry) : undefined}
+                  retryDisabled={sending}
+                />
+              ) : failed ? (
+                <View style={styles.failureCard}>
+                  <Text style={styles.failureTitle}>执行失败</Text>
+                  {messageRetry ? (
+                    <Pressable accessibilityRole="button" disabled={sending} onPress={() => void send(messageRetry)} style={[styles.failureRetry, sending && styles.failureRetryDisabled]}>
+                      <Ionicons name="refresh-outline" size={17} color={colors.danger} />
+                      <Text style={styles.failureRetryText}>{sending ? "处理中" : "重试"}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
               <Text selectable style={styles.messageText}>{item.content}</Text>
+              {failed && item.metadata?.errorDetail ? <ErrorDetails detail={item.metadata.errorDetail} /> : null}
+              {item.role === "assistant" && messageRetry ? (
+                <MessageActionBar content={item.content} onRetry={() => void send(messageRetry)} retryDisabled={sending} />
+              ) : null}
+                  </>
+                );
+              })()}
             </View>
           )}
         />
@@ -724,6 +838,15 @@ const styles = StyleSheet.create({
   assistantMessage: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   messageRole: { color: colors.primary, fontSize: 12, fontWeight: "700" },
   messageText: { color: colors.text, fontSize: 16, lineHeight: 24 },
+  failureCard: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: "#E4B4AE", borderRadius: radius.md, backgroundColor: "#FFF4F2" },
+  failureTitle: { color: colors.danger, fontSize: 13, fontWeight: "700" },
+  failureRetry: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.danger, borderRadius: radius.sm },
+  failureRetryDisabled: { opacity: 0.5 },
+  failureRetryText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
+  errorDetails: { gap: spacing.xs, padding: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  errorDetailsToggle: { minHeight: 28, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  errorDetailsLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
+  errorDetailsText: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   composer: { gap: spacing.xs, padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
   composerRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
   editingBanner: { minHeight: 36, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

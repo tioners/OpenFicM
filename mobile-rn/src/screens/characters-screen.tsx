@@ -16,19 +16,22 @@ import {
 import { KeyboardAwareScrollView, KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen } from "@/components/ui";
-import { deleteCharacter, listCharacters, saveCharacter } from "@/data/repositories";
+import { deleteCharacter, getProject, listCharacters, saveCharacter } from "@/data/repositories";
+import { exportCharacters, type LibraryExportFormat } from "@/lib/export";
 import type { RootStackParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
-import type { Character } from "@/types";
+import type { Character, Project } from "@/types";
 
 export function CharactersScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const projectId = useAppStore((state) => state.currentProjectId);
+  const [project, setProject] = useState<Project | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editing, setEditing] = useState<Character | null>(null);
@@ -38,6 +41,7 @@ export function CharactersScreen() {
 
   const load = useCallback(async () => {
     if (!projectId) {
+      setProject(null);
       setCharacters([]);
       setLoading(false);
       return;
@@ -45,7 +49,10 @@ export function CharactersScreen() {
     setLoading(true);
     setError(null);
     try {
-      setCharacters(await listCharacters(projectId, query));
+      const [nextProject, nextCharacters] = await Promise.all([getProject(projectId), listCharacters(projectId, query)]);
+      if (!nextProject) throw new Error("作品不存在");
+      setProject(nextProject);
+      setCharacters(nextCharacters);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
@@ -104,6 +111,46 @@ export function CharactersScreen() {
     ]);
   };
 
+  const runExport = async (items: Character[], format: LibraryExportFormat): Promise<void> => {
+    if (!project || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      await exportCharacters(project, items, format);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : String(exportError));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const chooseExport = (items: Character[], title: string) => {
+    Alert.alert(title, "选择导出格式", [
+      { text: "取消", style: "cancel" },
+      { text: "JSON", onPress: () => void runExport(items, "json") },
+      { text: "Markdown", onPress: () => void runExport(items, "markdown") },
+    ]);
+  };
+
+  const exportAll = async (format: LibraryExportFormat): Promise<void> => {
+    if (!projectId) return;
+    setError(null);
+    try {
+      await runExport(await listCharacters(projectId), format);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : String(exportError));
+    }
+  };
+
+  const chooseBulkExport = () => {
+    if (!projectId || !project || exporting) return;
+    Alert.alert("导出全部角色", "选择导出格式", [
+      { text: "取消", style: "cancel" },
+      { text: "JSON", onPress: () => void exportAll("json") },
+      { text: "Markdown", onPress: () => void exportAll("markdown") },
+    ]);
+  };
+
   if (!projectId) return <Screen><Header title="角色" onBack={() => navigation.goBack()} /><EmptyState title="请先从书架打开一部作品" /></Screen>;
 
   return (
@@ -111,7 +158,14 @@ export function CharactersScreen() {
       <Header
         title="角色"
         onBack={() => navigation.goBack()}
-        action={<Pressable accessibilityLabel="新建角色" onPress={() => openEditor()} style={styles.iconButton}><Ionicons name="add" size={26} color={colors.primary} /></Pressable>}
+        action={(
+          <View style={styles.headerActions}>
+            <Pressable accessibilityLabel="批量导出角色" disabled={exporting} onPress={chooseBulkExport} style={styles.iconButton}>
+              {exporting ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="download-outline" size={22} color={colors.primary} />}
+            </Pressable>
+            <Pressable accessibilityLabel="新建角色" onPress={() => openEditor()} style={styles.iconButton}><Ionicons name="add" size={26} color={colors.primary} /></Pressable>
+          </View>
+        )}
       />
       <View style={styles.searchWrap}>
         <Field label="搜索角色" value={query} onChangeText={setQuery} placeholder="按名称或设定搜索" returnKeyType="search" />
@@ -132,9 +186,14 @@ export function CharactersScreen() {
               </View>
               <Text numberOfLines={3} style={styles.description}>{item.description || "暂无角色设定"}</Text>
             </View>
-            <Pressable accessibilityLabel="删除角色" onPress={() => remove(item)} hitSlop={8} style={styles.iconButton}>
-              <Ionicons name="trash-outline" size={19} color={colors.textMuted} />
-            </Pressable>
+            <View style={styles.rowActions}>
+              <Pressable accessibilityLabel={`导出角色 ${item.name}`} disabled={exporting} onPress={(event) => { event.stopPropagation(); chooseExport([item], `导出角色“${item.name}”`); }} hitSlop={8} style={styles.iconButton}>
+                <Ionicons name="download-outline" size={19} color={colors.textMuted} />
+              </Pressable>
+              <Pressable accessibilityLabel="删除角色" onPress={(event) => { event.stopPropagation(); remove(item); }} hitSlop={8} style={styles.iconButton}>
+                <Ionicons name="trash-outline" size={19} color={colors.textMuted} />
+              </Pressable>
+            </View>
           </Pressable>
         )}
       />
@@ -174,6 +233,7 @@ export function CharactersScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: "row", alignItems: "center" },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   searchWrap: { padding: spacing.lg, paddingBottom: spacing.sm },
   errorWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
@@ -184,6 +244,7 @@ const styles = StyleSheet.create({
   avatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
   avatarText: { color: "#FFFFFF", fontSize: 22, fontWeight: "700" },
   rowText: { flex: 1, minWidth: 0, gap: spacing.xs },
+  rowActions: { flexDirection: "row", alignItems: "center" },
   nameLine: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   name: { flex: 1, color: colors.text, fontSize: 16, fontWeight: "700" },
   description: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },

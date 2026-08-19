@@ -1,6 +1,6 @@
 # OpenFicM 项目交接记录
 
-最后更新：2026-08-19
+最后更新：2026-08-20
 
 这份文档用于让新的开发窗口快速恢复项目上下文。继续工作前先阅读本文件、根目录 AGENTS.md、README.md 和 mobile-rn/DESIGN.md。
 
@@ -56,7 +56,7 @@ GitHub 仓库：
 - API 或 Agent 运行失败后保留原用户消息，支持重试；重试删除失败提示并复用原用户消息，不重复插入用户消息。
 - 可以编辑历史用户消息；编辑点及其后续消息在 SQLite 独占事务中删除，再以新内容重新运行 Agent，保持线性上下文。
 - Agent 具有工具权限、结构化提问、实时 trace、角色/世界书/章节工具和子智能体委派能力，不是只返回文本的聊天窗口。
-- 内置 PC 端技能和智能体已同步到移动端；oh-story 更新只下载白名单 Markdown，不执行远程脚本或 Hook。
+- 基础 Agent/Skill 不再静态打进 APK；首次启动从 OpenFicM GitHub catalog 拉取并校验，oh-story 和 Lorn 内容也通过运行资源门禁按需安装，不执行远程脚本或 Hook。
 - 章节变化后会触发角色和世界书的一致性检查，Agent 可根据创作内容变动更新设定资料。
 
 ### 设置和模型
@@ -76,10 +76,10 @@ GitHub 仓库：
 
 ### 本地检索
 
-- APK 内置中文嵌入 GGUF 和重排 GGUF。
-- 资源通过 Android noCompress 打包，不在安装包内二次压缩。
+- APK 不包含中文嵌入 GGUF 和重排 GGUF。首次启动从 Hugging Face 拉取到应用私有目录，临时文件完成大小和 SHA-256 校验后才安装。
+- 运行资源完整后自动预热两个模型；高级设置不再提供手动预热/释放按钮，只显示状态和一键修复入口。
 - llama.rn 在手机 CPU 上加载模型；本机没有 Hexagon SDK，所以当前构建日志显示 CPU-only，这是预期降级，不是构建失败。
-- APK 中已验证包含：4,440,532 字节的 index.android.bundle、219,068,480 字节的 GGUF、15,448,256 字节的 GGUF。
+- APK 中只应包含 JavaScript bundle，不应出现 `.gguf`、`builtin-catalog.json` 或 Lorn Skill 静态资源。
 
 ## 4. 代码结构
 
@@ -98,10 +98,10 @@ GitHub 仓库：
 - src/data/repositories.ts：作品、卷、章节、角色、世界书、会话、消息、模型和设置仓储。
 - src/lib/export.ts：Markdown 导出；文件名清理、范围筛选、缓存文件和系统分享。
 - src/search：本地全文、嵌入和重排索引。
-- src/settings：默认设置、PC 内置技能/智能体同步和 oh-story 内容更新。
+- src/settings：默认设置、运行时 Agent/Skill 资源安装、Lorn 文风插件和 oh-story 内容更新。
 - src/components：移动端通用 UI、错误提示、Agent trace 和输入控件。
-- assets/models：模型下载/校验相关脚本与资源配置；大 GGUF 不应被 Git 追踪。
-- android/app/build.gradle：Android 版本、签名环境变量、GGUF noCompress 和 Release 配置。
+- assets/models：运行时模型来源、许可证和哈希说明；大 GGUF 不应被 Git 追踪。
+- android/app/build.gradle：Android 版本、签名环境变量和 Release 配置。
 - scripts/build-release.ps1：正式 Release 构建、版本命名、可选 lineage 签名和 SHA-256 输出。
 
 ### 保留的上游目录
@@ -164,7 +164,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - Release 脚本正式签名：成功。
 - apksigner：v2 签名验证通过，正式证书为 c5dd…f863。
 - aapt2：package com.openfic.mobile，versionCode 6，versionName 0.6.0。
-- APK 条目：JS bundle 和两个 GGUF 均存在且大小非零。
+- 本轮类型检查和配置扫描应确认 APK 不再引用 GGUF asset、内置 catalog 或 `noCompress 'gguf'`。
 - verify-change：通过，设计文档已同步。
 - verify-quality：通过；仅报告已有 runtime.ts 和 repositories.ts 文件超过 500 行以及若干既有长行。
 - verify-security：严重、高危、中危、低危均为 0。

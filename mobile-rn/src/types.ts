@@ -111,6 +111,14 @@ export interface AgentClarificationResponse {
 
 export interface ChatMessageMetadata {
   agentTrace?: AgentRunTrace;
+  taskStatus?: "completed" | "failed";
+  errorMessage?: string;
+  errorDetail?: string;
+  retryContext?: {
+    userMessageId: string;
+    modelId: string;
+    agentId: string | null;
+  };
 }
 
 export interface ChatMessage {
