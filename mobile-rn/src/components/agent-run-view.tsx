@@ -176,7 +176,7 @@ export function AgentTraceView({
           {trace.collaborationRequired ? (
             <View style={styles.collaborationNotice}>
               <Ionicons name="people-outline" size={16} color={colors.primary} />
-              <Text style={styles.collaborationText}>此任务已启用专业智能体协作</Text>
+              <Text style={styles.collaborationText}>此任务可按需调用专业子智能体协作</Text>
             </View>
           ) : null}
           {trace.events.map((event) => <TraceEventRow key={event.id} event={event} />)}

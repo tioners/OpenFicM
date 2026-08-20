@@ -6,6 +6,8 @@ import { normalizeMaxOutputTokens } from "./limits";
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_REQUEST_ATTEMPTS = 3;
+// 服务端过载类错误只重试一次，避免中转站限流时把请求量再翻倍。
+const MAX_SERVER_ERROR_ATTEMPTS = 2;
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -95,7 +97,7 @@ async function requestJson(url: string, init: RequestInit): Promise<Record<strin
       const requestError = new Error(`HTTP ${response.status}: ${detail}`);
       lastError = requestError;
       // Surface rate limiting immediately so one failed agent turn cannot amplify it.
-      const maxAttempts = response.status === 429 ? 1 : MAX_REQUEST_ATTEMPTS;
+      const maxAttempts = response.status === 429 ? 1 : MAX_SERVER_ERROR_ATTEMPTS;
       if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt + 1 >= maxAttempts) throw requestError;
       await sleep(retryDelay(response, attempt));
     } catch (error) {

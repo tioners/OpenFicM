@@ -1,6 +1,6 @@
 # OpenFicM 项目交接记录
 
-最后更新：2026-08-20
+最后更新：2026-08-21
 
 这份文档用于让新的开发窗口快速恢复项目上下文。继续工作前先阅读本文件、根目录 AGENTS.md、README.md 和 mobile-rn/DESIGN.md。
 
@@ -10,32 +10,32 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.7.1
+当前正式版本：0.7.4
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.1
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.4
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
+
+仓库是从上游 OpenFic clone 出来的，本地继承了上游全部 Git 标签（v0.2.0 到 v0.10.0）。这些标签指向 syrizelink 的提交，不是 OpenFicM 的发布点。打新版本标签前必须先确认同名标签是否已被上游占用，否则会像 v0.7.3 那样把 Release 挂到上游代码上。v0.7.3 的 Release 页面因此指向上游提交 7ea4437，APK 资产本身是正确的；该版本已由 0.7.4 取代，不再修复。
 
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.7.1 发布提交，以 v0.7.1 标签为准
-- 本轮审查基线：a335640 fix(mobile): finalize 0.7.0 release hardening
-- Release 标签：v0.7.1
+- 最新源码提交：本次 0.7.4 发布提交，以 v0.7.4 标签为准
+- 本轮审查基线：f8b94ea fix(agent): reduce unnecessary consistency requests
+- Release 标签：v0.7.4
 - Android applicationId：com.openfic.mobile
-- versionCode：8
-- versionName：0.7.1
+- versionCode：11
+- versionName：0.7.4
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.7.1.apk；APK 和密钥均被 Git 忽略
-- APK 大小：132,463,528 字节（126.33 MiB）
-- APK SHA-256：1BB2CA9245DF999AAE41FCA68E531EE7D370394B239EE40002AC53EC6B4908B5
+- Release APK：仓库根目录 OpenFicM-Android-0.7.4.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.7.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版新增独立参考书库、Lorn 文风蒸馏、参考/作者文风版本、AI 原稿与作者定稿对比进化，以及助手和写作页的动态文风注入。正式脚本继续先删除受路径保护的 android/app/build 目录，并在复制产物前拒绝任何 .gguf 条目。最终 APK 已确认不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
+0.7.4 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版是针对 429 限流和"角色/世界书检查未完成"的定向修复：取消运行时强制委派子智能体、为整次任务加入共享的模型请求预算、修正一致性检查的状态显示，并降低服务端过载类错误的重试倍数。详见 docs/releases/v0.7.4.md。
 
 ## 3. 功能清单
 
@@ -58,7 +58,8 @@ GitHub 仓库：
 - 可以编辑历史用户消息；编辑点及其后续消息在 SQLite 独占事务中删除，再以新内容重新运行 Agent，保持线性上下文。
 - Agent 具有工具权限、结构化提问、实时 trace、角色/世界书/章节工具和子智能体委派能力，不是只返回文本的聊天窗口。
 - 基础 Agent/Skill 不再静态打进 APK；首次启动从 OpenFicM GitHub catalog 拉取并校验，oh-story 和 Lorn 内容也通过运行资源门禁按需安装，不执行远程脚本或 Hook。
-- 章节变化后会触发角色和世界书的一致性检查，Agent 可根据创作内容变动更新设定资料。
+- 章节变化后会触发角色和世界书的一致性检查，Agent 可根据创作内容变动更新设定资料；检查是提示词层的建议而不是运行时硬阻塞，未发现变化时不会追加额外模型请求。
+- 是否委派子智能体由模型按任务判断，运行时不再强制。主智能体与其全部子智能体共享一次对话最多 24 次模型请求的预算，超出后明确报错而不是继续放大限流。
 
 ### 设置和模型
 
@@ -82,7 +83,7 @@ GitHub 仓库：
 - 参考文风与作品无关，可跨作品选择；作者文风按作品隔离，并保存递增版本。
 - 助手页和写作页都可选择创作文风；文风会注入主智能体和正文类子智能体。
 - `write_chapter`/`edit_chapter` 保存 AI 原稿和所用文风；作者实际修改并保存后，可在预览页进化当前作品的作者文风。
-- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.7.1 发布亮点见 `docs/releases/v0.7.1.md`。
+- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.7.4 发布亮点见 `docs/releases/v0.7.4.md`。
 
 ### 本地检索
 
@@ -169,23 +170,21 @@ $env:OPENFICM_RELEASE_KEY_PASSWORD = $password
 powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 ~~~
 
-脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.1.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
+脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.4.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
 
 ### 已完成的校验
 
 - npm run type-check：通过。
-- npx expo-doctor：20/20 通过。
-- Gradle assembleRelease：BUILD SUCCESSFUL。
-- Release 脚本正式签名：成功。
-- apksigner：v2 签名验证通过，正式证书为 c5dd…f863。
-- aapt2：package com.openfic.mobile，versionCode 8，versionName 0.7.1，minSdk 28，targetSdk 36。
-- APK ZIP：内置 index.android.bundle，仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录；最终大小 126.33 MiB。
-- APK SHA-256：1BB2CA9245DF999AAE41FCA68E531EE7D370394B239EE40002AC53EC6B4908B5。
-- 固定提交上的 OpenFicM catalog 与 Lorn mobile catalog 已重新下载，SHA-256 均与代码常量一致。
-- verify-change：通过，设计文档已同步。
-- verify-quality：通过；仅报告已有 runtime.ts 和 repositories.ts 文件超过 500 行以及若干既有长行。
-- verify-security：严重、高危、中危、低危均为 0。
+- Gradle assembleRelease：BUILD SUCCESSFUL，1m 58s。
+- Release 脚本正式签名：成功。脚本末尾的 Get-FileHash 在从 Git Bash 嵌套调用 PowerShell 时会因 PSModulePath 丢失而报 CommandNotFoundException；APK 本身已生成并签名，改用 sha256sum 或在原生 PowerShell 会话中重跑即可。
+- apksigner verify --verbose：Verifies，v2 签名方案通过，正式证书为 c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863。
+- aapt2：package com.openfic.mobile，versionCode 11，versionName 0.7.4，minSdk 28，targetSdk 36。
+- APK ZIP：1220 个条目，内置 index.android.bundle，仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
+- APK 大小：132,477,544 字节（126.34 MiB）。
+- APK SHA-256：02F240E4810BEDCA8E82D98F2BFB3F35682D40D6C2E54F25147FE4F49BE3C37F。
 - npm audit：报告 Metro 构建链的 image-size 高危 DoS 和 Xcode 构建链的 uuid 中危问题；它们不进入 APK，且 image-size 截至 2026-08-20 无上游修复版本。不要运行会把 Expo 57 降到 53 的 npm audit fix --force，等待 Expo/Metro 上游升级。
+
+本轮未重跑 expo-doctor 与 0.7.1 时的 catalog 下载校验、verify-change/quality/security 检查；改动只涉及 Agent 请求调度、重试上限、一条 UI 文案和文档，未触及供应链常量或原生依赖。
 
 ## 7. 发布流程
 
@@ -200,14 +199,15 @@ git push origin main
 正式 Release 使用 GitHub CLI：
 
 ~~~powershell
-gh release create v0.7.1 .\OpenFicM-Android-0.7.1.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.1" --notes-file docs/releases/v0.7.1.md --latest
+gh release create v0.7.4 .\OpenFicM-Android-0.7.4.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.4" --notes-file docs/releases/v0.7.4.md --latest
 ~~~
 
-不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.1 和 gh release list 验证标签及资产。
+不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.4 和 gh release list 验证标签及资产。
 
 ## 8. 已知限制和后续重点
 
-- 本轮 0.7.1 独立测试 APK 已由用户手动安装并确认通过；正式包仍需继续观察真我 GT7 和红米 K90 PRO MAX 上的长期创作、升级、分享导出及本地模型内存表现。
+- 0.7.4 的 APK 尚未在真机上验证。上一次由用户手动安装确认通过的是 0.7.1；0.7.4 需要在真我 GT7 和红米 K90 PRO MAX 上实测本轮的 Agent 请求调度改动，重点是复杂创作是否仍会触发 429、一致性检查状态是否如实显示，以及长期创作、升级、分享导出和本地模型内存表现。
+- 24 次模型请求预算是按主智能体 12 轮加一层子智能体 12 轮估算的上限。如果实测中正常任务频繁撞上限，应先确认是不是模型陷入了工具调用循环，再考虑调整 MAX_TOTAL_MODEL_REQUESTS，不要直接放大预算。
 - CPU-only 是当前环境的构建结果；旗舰手机性能足够，但首次加载 GGUF 仍可能需要时间和较多内存。
 - API 不可达时现在支持重试，但没有离线替代的云模型回答；本地作品编辑和本地检索仍可用。
 - Release 只提供 arm64-v8a；不应为了兼容旧 32 位设备引入额外 ABI，除非重新评估两个 GGUF 带来的体积。

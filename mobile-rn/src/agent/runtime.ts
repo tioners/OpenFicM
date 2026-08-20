@@ -39,6 +39,8 @@ import { agentTools, executeAgentTool } from "./tools";
 
 const MAX_AGENT_ITERATIONS = 12;
 const MAX_DELEGATION_DEPTH = 1;
+// 主智能体与全部子智能体共享同一个请求预算，避免一条消息把中转站的 RPM 打满。
+const MAX_TOTAL_MODEL_REQUESTS = 24;
 const MAX_TRACE_STRING_LENGTH = 700;
 const CHARACTER_CONSISTENCY_TOOL_NAMES = new Set([
   "list_characters",
@@ -75,10 +77,11 @@ type LoopResult = {
   characterConsistencyChecked: boolean;
   worldConsistencyChecked: boolean;
   consistencyEventId: string | null;
-  delegationSucceeded: boolean;
 };
 
 type TraceEventDraft = Omit<AgentTraceEvent, "id" | "startedAt" | "completedAt">;
+
+type RequestBudget = { remaining: number };
 
 type LoopInput = {
   project: Project;
@@ -91,10 +94,10 @@ type LoopInput = {
   approveTool?: ToolApproval;
   askUser?: AskUser;
   recorder: TraceRecorder;
-  collaborationRequired: boolean;
   requiredSkill: AgentSkill | null;
   userRequest: string;
   depth: number;
+  budget: RequestBudget;
 };
 
 export interface AgentRunResult {
@@ -122,7 +125,7 @@ function cloneTrace(trace: AgentRunTrace): AgentRunTrace {
 
 function createTraceRecorder(
   agent: AgentDefinition,
-  collaborationRequired: boolean,
+  collaborationSuggested: boolean,
   onTrace?: TraceListener,
 ) {
   let trace: AgentRunTrace = {
@@ -131,7 +134,7 @@ function createTraceRecorder(
     status: "running",
     primaryAgentId: agent.id,
     primaryAgentName: agent.name,
-    collaborationRequired,
+    collaborationRequired: collaborationSuggested,
     startedAt: new Date().toISOString(),
     events: [],
   };
@@ -395,7 +398,7 @@ function systemPrompt(input: {
   }
   const delegates = enabledDelegates(input.catalog, input.agent);
   if (delegates.length) {
-    sections.push(`可委派的子智能体：\n${delegates.map((agent) => `- ${agent.name}（${agent.id}）：${agent.description}`).join("\n")}\n复杂创作任务必须按专业分工调用 delegate_agent；委派任务包含目标、作品上下文、交付物和限制。主智能体负责整合结果，不能把子智能体原文不加判断地直接转交用户。`);
+    sections.push(`可委派的子智能体：\n${delegates.map((agent) => `- ${agent.name}（${agent.id}）：${agent.description}`).join("\n")}\n需要额外专业视角时才调用 delegate_agent，委派任务包含目标、作品上下文、交付物和限制；单轮续写、润色或小改动自己完成即可，不要为了形式分工额外发起请求。主智能体负责整合结果，不能把子智能体原文不加判断地直接转交用户。`);
   }
   return sections.join("\n\n");
 }
@@ -506,32 +509,6 @@ async function selectionForAgent(agent: AgentDefinition, fallback: ModelSelectio
   return { model, provider, apiKey };
 }
 
-function fallbackDelegate(delegates: AgentDefinition[], request: string): AgentDefinition {
-  const preferredKey = /(审查|检查|复盘|质量)/.test(request)
-    ? "reviewer"
-    : /(角色|人物|对白|对话|关系)/.test(request)
-      ? "actor"
-      : /(续写|扩写|改写|重写|正文|章节)/.test(request)
-        ? "writer"
-        : /(大纲|规划|设定|世界观|剧情|情节|创作思路)/.test(request)
-          ? "composer"
-          : "explore";
-  return delegates.find((agent) => agent.id.includes(preferredKey) || agent.name.toLowerCase().includes(preferredKey))
-    ?? delegates[0];
-}
-
-function mergeChildResult(
-  current: Pick<LoopResult, "consistencyRequired" | "characterConsistencyChecked" | "worldConsistencyChecked" | "consistencyEventId">,
-  child: LoopResult,
-): Pick<LoopResult, "consistencyRequired" | "characterConsistencyChecked" | "worldConsistencyChecked" | "consistencyEventId"> {
-  return {
-    consistencyRequired: current.consistencyRequired || child.consistencyRequired,
-    characterConsistencyChecked: current.characterConsistencyChecked || child.characterConsistencyChecked,
-    worldConsistencyChecked: current.worldConsistencyChecked || child.worldConsistencyChecked,
-    consistencyEventId: child.consistencyEventId ?? current.consistencyEventId,
-  };
-}
-
 async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   const prompt = systemPrompt({
     project: input.project,
@@ -555,10 +532,6 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   let characterConsistencyChecked = false;
   let worldConsistencyChecked = false;
   let consistencyEventId = input.consistencyEventId;
-  let collaborationReminderSent = false;
-  let fallbackDelegationAttempted = false;
-  let delegationSucceeded = false;
-  let collaborationUnavailable = false;
 
   if (input.requiredSkill) {
     const skillEventId = input.recorder.add({
@@ -592,103 +565,20 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   }
 
   for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration += 1) {
+    if (input.budget.remaining <= 0) {
+      throw new Error("本次任务的模型请求次数已达上限，请拆分需求后重试");
+    }
+    input.budget.remaining -= 1;
     const turn = await callModel(input.selection, messages, tools);
     messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
 
     if (turn.toolCalls.length === 0) {
-      const consistencyChecked = characterConsistencyChecked && worldConsistencyChecked;
-      const initialReminders: string[] = [];
-      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable && !collaborationReminderSent) {
-        collaborationReminderSent = true;
-        initialReminders.push("这是复杂创作任务，必须先调用 delegate_agent 让一个匹配的专业子智能体参与，再整合其结果。");
-      }
-      if (initialReminders.length) {
-        messages.push({ role: "system", content: initialReminders.join("\n") });
-        continue;
-      }
-
-      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable && !fallbackDelegationAttempted) {
-        fallbackDelegationAttempted = true;
-        const delegates = enabledDelegates(input.catalog, input.agent);
-        const childAgent = fallbackDelegate(delegates, input.userRequest);
-        const task = `请作为专业子智能体参与以下创作任务。先用工具读取当前作品的必要资料，再给出可供主智能体整合的具体成果。若用户已确认新的角色或世界设定，请同步更新；若仍有关键歧义，使用 ask_user。\n\n用户任务：${truncate(input.userRequest, 12_000)}\n\n主智能体当前草案：${truncate(turn.content || "尚无", 12_000)}`;
-        const call: AgentToolCall = {
-          id: createId(),
-          name: "delegate_agent",
-          arguments: { agent_id: childAgent.id, task },
-        };
-        const eventId = input.recorder.add({
-          kind: "agent",
-          status: input.catalog.permissions.delegate_agent === "ask" ? "waiting" : "running",
-          title: `${childAgent.name} 正在协作`,
-          agentName: input.agent.name,
-          toolName: "delegate_agent",
-          detail: "主智能体未主动委派，运行时已自动补充专业协作",
-          input: formatTracePayload({ task }),
-        });
-        try {
-          await authorizeToolCall(call, input.catalog.permissions, input.approveTool);
-          input.recorder.update(eventId, { status: "running", detail: "正在读取作品并处理任务" });
-          const childSelection = await selectionForAgent(childAgent, input.selection);
-          const childResult = await runAgentLoop({
-            ...input,
-            selection: childSelection,
-            history: [{ role: "user", content: task }],
-            agent: childAgent,
-            consistencyReason: null,
-            consistencyEventId: null,
-            collaborationRequired: false,
-            requiredSkill: requiredSkillForRequest(input.catalog, childAgent, task),
-            userRequest: task,
-            depth: input.depth + 1,
-          });
-          ({
-            consistencyRequired,
-            characterConsistencyChecked,
-            worldConsistencyChecked,
-            consistencyEventId,
-          } = mergeChildResult({
-            consistencyRequired,
-            characterConsistencyChecked,
-            worldConsistencyChecked,
-            consistencyEventId,
-          }, childResult));
-          delegationSucceeded = true;
-          input.recorder.update(eventId, {
-            status: "completed",
-            detail: `${childAgent.name} 已返回结果`,
-            output: truncate(childResult.content, 1_600),
-          });
-          messages.push({
-            role: "system",
-            content: `自动专业协作结果（${childAgent.name}）：\n${childResult.content}\n\n请结合用户需求和已读取的作品资料审慎整合，不要原样转交。`,
-          });
-          continue;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          input.recorder.update(eventId, { status: "error", detail: message });
-          collaborationUnavailable = true;
-          messages.push({
-            role: "system",
-            content: `子智能体协作未成功（${message}）。请继续由主智能体完成任务，并在最终答复中说明协作受限。`,
-          });
-          continue;
-        }
-      }
-
-      if (consistencyRequired && consistencyEventId && !consistencyChecked) {
-        input.recorder.update(consistencyEventId, {
-          status: "completed",
-          detail: "已完成本轮创作；仅在发现明确设定变化时同步角色或世界书",
-        });
-      }
-      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable) {
-        throw new Error("复杂任务未完成专业子智能体协作");
-      }
       if (consistencyRequired && consistencyEventId) {
         input.recorder.update(consistencyEventId, {
           status: "completed",
-          detail: "已核对角色与世界书，并同步确认的变化",
+          detail: characterConsistencyChecked && worldConsistencyChecked
+            ? "已核对角色与世界书，并同步确认的变化"
+            : "已完成本轮创作；未发现需要同步的角色或世界书变化",
         });
       }
       return {
@@ -697,7 +587,6 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
         characterConsistencyChecked,
         worldConsistencyChecked,
         consistencyEventId,
-        delegationSucceeded,
       };
     }
 
@@ -765,23 +654,10 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
             agent: childAgent,
             consistencyReason: null,
             consistencyEventId: null,
-            collaborationRequired: false,
             requiredSkill: requiredSkillForRequest(input.catalog, childAgent, task),
             userRequest: task,
             depth: input.depth + 1,
           });
-          ({
-            consistencyRequired,
-            characterConsistencyChecked,
-            worldConsistencyChecked,
-            consistencyEventId,
-          } = mergeChildResult({
-            consistencyRequired,
-            characterConsistencyChecked,
-            worldConsistencyChecked,
-            consistencyEventId,
-          }, childResult));
-          delegationSucceeded = true;
           result = { agent_id: childAgent.id, agent_name: childAgent.name, result: childResult.content };
           eventDetail = `${childAgent.name} 已返回结果`;
         } else if (call.name === "evolve_author_style") {
@@ -857,7 +733,6 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         input.recorder.update(eventId, { status: "error", detail: message });
-        if (call.name === "delegate_agent") collaborationUnavailable = true;
         messages.push({
           role: "tool",
           content: JSON.stringify({ error: message }),
@@ -909,7 +784,7 @@ export async function runAgent(input: {
   const agent = activePrimaryAgent(agents, input.agentId ?? activeAgentId);
   const userRequest = latestUserRequest(input.history);
   const delegates = enabledDelegates(catalog, agent);
-  const collaborationRequired = requiresAgentCollaboration(userRequest)
+  const collaborationSuggested = requiresAgentCollaboration(userRequest)
     && delegates.length > 0
     && toolsForAgent(agent).some((tool) => tool.name === "delegate_agent")
     && permissions.delegate_agent !== "deny";
@@ -918,7 +793,7 @@ export async function runAgent(input: {
       ? "用户本轮提供了可能影响角色或世界书的创作决定"
       : null);
   const requiredSkill = requiredSkillForRequest(catalog, agent, userRequest);
-  const recorder = createTraceRecorder(agent, collaborationRequired, input.onTrace);
+  const recorder = createTraceRecorder(agent, collaborationSuggested, input.onTrace);
 
   try {
     await ensureWritingStyleSelection({
@@ -940,10 +815,10 @@ export async function runAgent(input: {
       approveTool: input.approveTool,
       askUser: input.askUser,
       recorder,
-      collaborationRequired,
       requiredSkill,
       userRequest,
       depth: 0,
+      budget: { remaining: MAX_TOTAL_MODEL_REQUESTS },
     });
     if (result.consistencyRequired) {
       await setSetting(consistencyKey, "");
