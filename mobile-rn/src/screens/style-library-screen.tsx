@@ -30,7 +30,9 @@ import type { RootStackParamList } from "@/navigation/types";
 import {
   distillReferenceStyle,
   getStyleDistillationCheckpoint,
+  getStyleDistillationCoverage,
   type StyleDistillationCheckpoint,
+  type StyleDistillationCoverage,
 } from "@/settings/lorn-style-plugin";
 import { importStyleSource, deleteStyleSource } from "@/style/source-library";
 import { useAppStore } from "@/store/app-store";
@@ -62,6 +64,7 @@ export function StyleLibraryScreen() {
   const [distillationError, setDistillationError] = useState<string | null>(null);
   const [distillationProgress, setDistillationProgress] = useState("");
   const [distillationCheckpoint, setDistillationCheckpoint] = useState<StyleDistillationCheckpoint | null>(null);
+  const [distillationCoverage, setDistillationCoverage] = useState<StyleDistillationCoverage | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [editingSource, setEditingSource] = useState(false);
   const [editingAuthorGuide, setEditingAuthorGuide] = useState(false);
@@ -75,6 +78,10 @@ export function StyleLibraryScreen() {
     () => profiles.filter((profile) => profile.kind === "reference"),
     [profiles],
   );
+  const coverageStarted = Boolean(distillationCoverage && distillationCoverage.coveredUntil > 0);
+  const coverageFinished = Boolean(distillationCoverage
+    && distillationCoverage.coveredUntil >= distillationCoverage.totalUnits);
+  const coverageUnitName = distillationCoverage?.unitKind === "segment" ? "段" : "章";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,12 +113,14 @@ export function StyleLibraryScreen() {
     setDistillationError(null);
     setDistillationProgress("");
     try {
-      const [nextProfiles, checkpoint] = await Promise.all([
+      const [nextProfiles, checkpoint, coverage] = await Promise.all([
         listStyleProfilesForSource(source.id),
         getStyleDistillationCheckpoint(source.id),
+        getStyleDistillationCoverage(source.id),
       ]);
       setSourceProfiles(nextProfiles);
       setDistillationCheckpoint(checkpoint);
+      setDistillationCoverage(coverage?.contentHash === source.contentHash ? coverage : null);
     } catch (sourceError) {
       setError(sourceError instanceof Error ? sourceError.message : String(sourceError));
       setSourceProfiles([]);
@@ -126,6 +135,7 @@ export function StyleLibraryScreen() {
     setDistillationError(null);
     setDistillationProgress("");
     setDistillationCheckpoint(null);
+    setDistillationCoverage(null);
   };
 
   const importBook = async () => {
@@ -157,10 +167,10 @@ export function StyleLibraryScreen() {
     setBusy(true);
     setError(null);
     setDistillationError(null);
-    setDistillationProgress("准备蒸馏章节样本");
+    setDistillationProgress(restart ? "重新开始蒸馏章节样本" : "准备蒸馏章节样本");
     try {
       const selection = await resolveModelSelection();
-      const profile = await distillReferenceStyle({
+      const result = await distillReferenceStyle({
         sourceId: selectedSource.id,
         selection,
         restart,
@@ -168,15 +178,21 @@ export function StyleLibraryScreen() {
           setDistillationProgress(total > 1 ? `${label}（${completed}/${total}）` : label);
         },
       });
-      setSourceProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
-      setProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
+      setSourceProfiles((current) => [result.profile, ...current.filter((item) => item.id !== result.profile.id)]);
+      setProfiles((current) => [result.profile, ...current.filter((item) => item.id !== result.profile.id)]);
       setDistillationCheckpoint(null);
-      openProfile(profile);
+      setDistillationCoverage(result.coverage);
+      openProfile(result.profile);
     } catch (distillError) {
       const message = distillError instanceof Error ? distillError.message : String(distillError);
       setError(message);
       setDistillationError(message);
-      setDistillationCheckpoint(await getStyleDistillationCheckpoint(selectedSource.id).catch(() => null));
+      const [checkpoint, coverage] = await Promise.all([
+        getStyleDistillationCheckpoint(selectedSource.id).catch(() => null),
+        getStyleDistillationCoverage(selectedSource.id).catch(() => null),
+      ]);
+      setDistillationCheckpoint(checkpoint);
+      setDistillationCoverage(coverage?.contentHash === selectedSource.contentHash ? coverage : null);
     } finally {
       setBusy(false);
     }
@@ -391,8 +407,15 @@ export function StyleLibraryScreen() {
                 </View>
               ) : (
                 <View style={styles.inlineActions}>
-                  <Button label="蒸馏文风" onPress={() => void distill()} disabled={busy} loading={busy} />
-                  {distillationCheckpoint ? <Button label="重新开始" variant="secondary" onPress={() => void distill(true)} disabled={busy} /> : null}
+                  <Button
+                    label={coverageStarted ? "继续蒸馏" : "蒸馏文风"}
+                    onPress={() => void distill()}
+                    disabled={busy || coverageFinished}
+                    loading={busy}
+                  />
+                  {coverageStarted || distillationCheckpoint ? (
+                    <Button label="重新开始" variant="secondary" onPress={() => void distill(true)} disabled={busy} />
+                  ) : null}
                   <Pressable accessibilityLabel="重命名参考书" onPress={() => setEditingSource(true)} style={styles.secondaryIconAction}>
                     <Ionicons name="create-outline" size={21} color={colors.text} />
                   </Pressable>
@@ -402,16 +425,31 @@ export function StyleLibraryScreen() {
                 </View>
               )}
               {distillationError ? <ErrorNotice message={distillationError} onRetry={() => void distill()} /> : null}
+              {distillationCoverage ? (
+                <View style={styles.checkpointBox}>
+                  <Text style={styles.checkpointTitle}>
+                    {coverageFinished ? "已覆盖全书" : `已完成 ${distillationCoverage.rounds} 轮蒸馏`}
+                  </Text>
+                  <Text style={styles.checkpointText}>
+                    覆盖到第 {distillationCoverage.coveredUntil}/{distillationCoverage.totalUnits} {coverageUnitName}。
+                    {coverageFinished
+                      ? "继续积累样本请点击“重新开始”重新扫描全书。"
+                      : "点击“继续蒸馏”会向后随机跳到未读区域，再取一段连续样本并入现有指南。"}
+                  </Text>
+                </View>
+              ) : null}
               {distillationCheckpoint ? (
                 <View style={styles.checkpointBox}>
                   <Text style={styles.checkpointTitle}>检测到未完成的蒸馏任务</Text>
-                  <Text style={styles.checkpointText}>已完成 {Math.min(distillationCheckpoint.completedMemos.length, distillationCheckpoint.batchCount)}/{distillationCheckpoint.batchCount} 批。点击“蒸馏文风”会从断点继续，不会重复已完成批次。</Text>
+                  <Text style={styles.checkpointText}>
+                    第 {distillationCheckpoint.windowStart + 1}-{distillationCheckpoint.windowStart + distillationCheckpoint.windowCount} {coverageUnitName}已完成 {Math.min(distillationCheckpoint.completedMemos.length, distillationCheckpoint.batchCount)}/{distillationCheckpoint.batchCount} 批。继续蒸馏会从断点接着跑，不会重复已完成批次。
+                  </Text>
                 </View>
               ) : null}
               {distillationProgress ? (
                 <Text style={styles.progressText}>{distillationProgress}</Text>
               ) : (
-                <Text style={styles.helperText}>按全书章节分布抽取最多 24 段，分批分析后汇总，不会上传整本小说。蒸馏使用当前设置中的默认模型。</Text>
+                <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入文风指南，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书。蒸馏使用当前设置中的默认模型。</Text>
               )}
               <Text style={styles.sectionTitle}>参考文风版本</Text>
               {sourceProfiles.length ? sourceProfiles.map((profile) => (

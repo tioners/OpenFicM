@@ -13,13 +13,23 @@ import {
 } from "@/data/style-repositories";
 import { createId } from "@/lib/id";
 import { sha256File } from "@/lib/sha256";
+import {
+  ANALYSIS_PASSAGE_COUNT,
+  describeWindow,
+  nextSampleWindow,
+  spreadIndices,
+  type StyleSampleWindow,
+  type StyleUnitKind,
+} from "@/style/sampling";
 import type { StyleSource, StyleSourceFormat } from "@/types";
+
+export { nextSampleWindow } from "@/style/sampling";
+export type { StyleSampleWindow, StyleUnitKind } from "@/style/sampling";
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 const MAX_EXTRACTED_CHARACTERS = 8_000_000;
 const MAX_EPUB_TEXT_ENTRY_BYTES = 4 * 1024 * 1024;
 const MAX_EPUB_TOTAL_TEXT_BYTES = 20 * 1024 * 1024;
-const ANALYSIS_PASSAGE_COUNT = 24;
 const ANALYSIS_PASSAGE_CHARACTERS = 1_400;
 const ANALYSIS_BATCH_SIZE = 6;
 const MIN_CHAPTER_HEADING_COUNT = 8;
@@ -30,6 +40,15 @@ export interface StyleAnalysisBatch {
   label: string;
   passageCount: number;
   text: string;
+}
+
+export interface StyleAnalysisPlan {
+  unitKind: StyleUnitKind;
+  totalUnits: number;
+  window: StyleSampleWindow | null;
+  windowLabel: string;
+  batches: StyleAnalysisBatch[];
+  passageCount: number;
 }
 
 const xmlParser = new XMLParser({
@@ -280,54 +299,108 @@ export async function readStyleSourceText(sourceId: string): Promise<string> {
   return file.text();
 }
 
-function analysisPassages(text: string): string[] {
+type SourceOutline = {
+  unitKind: StyleUnitKind;
+  unitStarts: number[];
+};
+
+// 章节标题足够多时按章切分，否则退化为定长连续段落，两种情况都得到统一的"单元"序列。
+function sourceOutline(text: string): SourceOutline {
   const chapterStarts = [...text.matchAll(CHAPTER_HEADING_PATTERN)]
     .map((match) => match.index ?? 0)
     .filter((start, index, values) => index === 0 || start > values[index - 1]);
-  const passages: string[] = [];
   if (chapterStarts.length >= MIN_CHAPTER_HEADING_COUNT) {
-    const count = Math.min(ANALYSIS_PASSAGE_COUNT, chapterStarts.length);
-    for (let index = 0; index < count; index += 1) {
-      const chapterIndex = Math.round((chapterStarts.length - 1) * index / Math.max(1, count - 1));
-      const start = chapterStarts[chapterIndex];
-      const end = chapterStarts[chapterIndex + 1] ?? text.length;
-      const passage = text.slice(start, Math.min(end, start + ANALYSIS_PASSAGE_CHARACTERS)).trim();
-      if (passage) passages.push(passage);
-    }
-    return passages;
+    return { unitKind: "chapter", unitStarts: chapterStarts };
   }
-  const count = Math.min(ANALYSIS_PASSAGE_COUNT, Math.max(1, Math.ceil(text.length / ANALYSIS_PASSAGE_CHARACTERS)));
-  const maximumStart = Math.max(0, text.length - ANALYSIS_PASSAGE_CHARACTERS);
-  for (let index = 0; index < count; index += 1) {
-    const approximateStart = Math.round(maximumStart * index / Math.max(1, count - 1));
-    const paragraphStart = text.lastIndexOf("\n", approximateStart);
-    const start = Math.max(0, paragraphStart >= approximateStart - 500 ? paragraphStart + 1 : approximateStart);
-    const passage = text.slice(start, start + ANALYSIS_PASSAGE_CHARACTERS).trim();
-    if (passage) passages.push(passage);
+  const unitStarts: number[] = [];
+  for (let start = 0; start < text.length; start += ANALYSIS_PASSAGE_CHARACTERS) {
+    const paragraphStart = text.lastIndexOf("\n", start);
+    unitStarts.push(Math.max(0, paragraphStart >= start - 500 ? paragraphStart + 1 : start));
   }
-  return passages;
+  return { unitKind: "segment", unitStarts: unitStarts.length ? unitStarts : [0] };
 }
 
-export async function readStyleSourceAnalysisBatches(sourceId: string): Promise<StyleAnalysisBatch[]> {
-  const text = await readStyleSourceText(sourceId);
-  const passages = analysisPassages(text);
-  if (!passages.length) throw new Error("参考书中没有可分析的正文");
-  const total = Math.ceil(passages.length / ANALYSIS_BATCH_SIZE);
-  return Array.from({ length: total }, (_, batchIndex) => {
-    const start = batchIndex * ANALYSIS_BATCH_SIZE;
-    const selected = passages.slice(start, start + ANALYSIS_BATCH_SIZE);
-    const end = start + selected.length;
+function passageAt(text: string, outline: SourceOutline, index: number): string {
+  const start = outline.unitStarts[index];
+  if (start === undefined) return "";
+  const nextStart = outline.unitStarts[index + 1] ?? text.length;
+  return text.slice(start, Math.min(nextStart, start + ANALYSIS_PASSAGE_CHARACTERS)).trim();
+}
+
+function buildBatches(
+  text: string,
+  outline: SourceOutline,
+  indices: number[],
+  describe: (unitIndex: number) => string,
+): StyleAnalysisBatch[] {
+  const selected = indices
+    .map((unitIndex) => ({ unitIndex, passage: passageAt(text, outline, unitIndex) }))
+    .filter((item) => item.passage);
+  if (!selected.length) throw new Error("参考书中没有可分析的正文");
+  const batchCount = Math.ceil(selected.length / ANALYSIS_BATCH_SIZE);
+  return Array.from({ length: batchCount }, (_, batchIndex) => {
+    const offset = batchIndex * ANALYSIS_BATCH_SIZE;
+    const items = selected.slice(offset, offset + ANALYSIS_BATCH_SIZE);
     return {
-      label: `章节样本 ${start + 1}-${end}`,
-      passageCount: selected.length,
-      text: selected.map((passage, index) => `[样本 ${start + index + 1}/${passages.length}]\n${passage}`).join("\n\n"),
+      label: `${describe(items[0].unitIndex)} 起的 ${items.length} 个样本`,
+      passageCount: items.length,
+      text: items
+        .map((item) => `[${describe(item.unitIndex)}]\n${item.passage}`)
+        .join("\n\n"),
     };
   });
 }
 
+/**
+ * window 优先：断点续跑时按记录的窗口原样重放。
+ * 否则 coveredUntil 为 null 时按全书均匀分布抽样（Agent 工具的取样行为），
+ * 传入数字时选出下一个连续窗口，供多轮"继续蒸馏"使用。
+ */
+export async function readStyleSourceAnalysisPlan(input: {
+  sourceId: string;
+  coveredUntil?: number | null;
+  window?: StyleSampleWindow | null;
+  random?: () => number;
+}): Promise<StyleAnalysisPlan> {
+  const text = await readStyleSourceText(input.sourceId);
+  const outline = sourceOutline(text);
+  const totalUnits = outline.unitStarts.length;
+  const unitName = outline.unitKind === "chapter" ? "章" : "段";
+  const describe = (unitIndex: number) => `第 ${unitIndex + 1} ${unitName}`;
+  const buildPlan = (window: StyleSampleWindow | null): StyleAnalysisPlan => {
+    const indices = window
+      ? Array.from({ length: window.count }, (_, index) => window.start + index)
+      : spreadIndices(totalUnits, ANALYSIS_PASSAGE_COUNT);
+    const batches = buildBatches(text, outline, indices, describe);
+    return {
+      unitKind: outline.unitKind,
+      totalUnits,
+      window,
+      windowLabel: window ? describeWindow(outline.unitKind, window) : "全书均匀分布",
+      batches,
+      passageCount: batches.reduce((total, batch) => total + batch.passageCount, 0),
+    };
+  };
+  if (input.window) {
+    const start = Math.max(0, Math.min(Math.floor(input.window.start), Math.max(0, totalUnits - 1)));
+    const count = Math.max(1, Math.min(Math.floor(input.window.count), totalUnits - start));
+    return buildPlan({ start, count });
+  }
+  if (input.coveredUntil === null || input.coveredUntil === undefined) return buildPlan(null);
+  const window = nextSampleWindow({
+    totalUnits,
+    coveredUntil: input.coveredUntil,
+    random: input.random,
+  });
+  if (!window) {
+    throw new Error(`已蒸馏到全书末尾（共 ${totalUnits} ${unitName}）。如需重新扫描请点击“重新开始”。`);
+  }
+  return buildPlan(window);
+}
+
 export async function readStyleSourceSample(sourceId: string): Promise<string> {
-  const batches = await readStyleSourceAnalysisBatches(sourceId);
-  return batches.map((batch) => batch.text.slice(0, ANALYSIS_PASSAGE_CHARACTERS + 200)).join("\n\n");
+  const plan = await readStyleSourceAnalysisPlan({ sourceId });
+  return plan.batches.map((batch) => batch.text.slice(0, ANALYSIS_PASSAGE_CHARACTERS + 200)).join("\n\n");
 }
 
 export async function deleteStyleSource(sourceId: string): Promise<void> {

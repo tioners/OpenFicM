@@ -7,8 +7,12 @@ import {
   getActiveStyleProfile,
   getLatestAuthorStyleProfile,
   getStyleSource,
+  listStyleProfilesForSource,
 } from "@/data/style-repositories";
-import { readStyleSourceAnalysisBatches } from "@/style/source-library";
+import {
+  readStyleSourceAnalysisPlan,
+  type StyleUnitKind,
+} from "@/style/source-library";
 import { compactLornDistillationInstructions, getLornDistillationInstructions } from "@/settings/remote-resources";
 
 const MAX_STYLE_TEXT_CHARACTERS = 100_000;
@@ -30,12 +34,73 @@ export interface StyleDistillationCheckpoint {
   providerId: string;
   modelId: string;
   batchCount: number;
+  windowStart: number;
+  windowCount: number;
   completedMemos: string[];
+  updatedAt: string;
+}
+
+/** 每本参考书的多轮蒸馏进度。coveredUntil 是已覆盖到的单元下标（不含），单向递增。 */
+export interface StyleDistillationCoverage {
+  version: 1;
+  sourceId: string;
+  contentHash: string;
+  unitKind: StyleUnitKind;
+  totalUnits: number;
+  coveredUntil: number;
+  rounds: number;
   updatedAt: string;
 }
 
 function distillationCheckpointKey(sourceId: string): string {
   return `style.distillation.checkpoint.${sourceId}`;
+}
+
+function distillationCoverageKey(sourceId: string): string {
+  return `style.distillation.coverage.${sourceId}`;
+}
+
+export async function getStyleDistillationCoverage(sourceId: string): Promise<StyleDistillationCoverage | null> {
+  const raw = await getSetting(distillationCoverageKey(sourceId));
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const totalUnits = typeof record.totalUnits === "number" ? record.totalUnits : null;
+    const coveredUntil = typeof record.coveredUntil === "number" ? record.coveredUntil : null;
+    const rounds = typeof record.rounds === "number" ? record.rounds : null;
+    if (record.version !== 1
+      || record.sourceId !== sourceId
+      || typeof record.contentHash !== "string"
+      || (record.unitKind !== "chapter" && record.unitKind !== "segment")
+      || totalUnits === null || !Number.isInteger(totalUnits) || totalUnits < 1
+      || coveredUntil === null || !Number.isInteger(coveredUntil) || coveredUntil < 0
+      || rounds === null || !Number.isInteger(rounds) || rounds < 0) return null;
+    return {
+      version: 1,
+      sourceId,
+      contentHash: record.contentHash,
+      unitKind: record.unitKind,
+      totalUnits,
+      coveredUntil: Math.min(coveredUntil, totalUnits),
+      rounds,
+      updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveStyleDistillationCoverage(coverage: Omit<StyleDistillationCoverage, "updatedAt">): Promise<void> {
+  await setSetting(distillationCoverageKey(coverage.sourceId), JSON.stringify({
+    ...coverage,
+    updatedAt: new Date().toISOString(),
+  } satisfies StyleDistillationCoverage));
+}
+
+export async function clearStyleDistillationCoverage(sourceId: string): Promise<void> {
+  await setSetting(distillationCoverageKey(sourceId), "");
 }
 
 export async function getStyleDistillationCheckpoint(sourceId: string): Promise<StyleDistillationCheckpoint | null> {
@@ -46,6 +111,8 @@ export async function getStyleDistillationCheckpoint(sourceId: string): Promise<
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const record = value as Record<string, unknown>;
     const batchCount = typeof record.batchCount === "number" ? record.batchCount : null;
+    const windowStart = typeof record.windowStart === "number" ? record.windowStart : null;
+    const windowCount = typeof record.windowCount === "number" ? record.windowCount : null;
     if (record.version !== 1
       || record.sourceId !== sourceId
       || typeof record.contentHash !== "string"
@@ -54,6 +121,8 @@ export async function getStyleDistillationCheckpoint(sourceId: string): Promise<
       || batchCount === null
       || !Number.isInteger(batchCount)
       || batchCount < 1
+      || windowStart === null || !Number.isInteger(windowStart) || windowStart < 0
+      || windowCount === null || !Number.isInteger(windowCount) || windowCount < 1
       || !Array.isArray(record.completedMemos)
       || !record.completedMemos.every((memo) => typeof memo === "string")) return null;
     return {
@@ -63,6 +132,8 @@ export async function getStyleDistillationCheckpoint(sourceId: string): Promise<
       providerId: record.providerId,
       modelId: record.modelId,
       batchCount,
+      windowStart,
+      windowCount,
       completedMemos: record.completedMemos as string[],
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
     };
@@ -137,6 +208,31 @@ function distillationSynthesisPrompt(sourceTitle: string, memos: string[]): stri
   ].join(String.fromCharCode(10, 10));
 }
 
+function distillationContinuationPrompt(input: {
+  sourceTitle: string;
+  currentGuide: string;
+  memos: string[];
+  windowLabel: string;
+  coveredUntil: number;
+  totalUnits: number;
+  unitName: string;
+  round: number;
+}): string {
+  const evidence = input.memos
+    .map((memo, index) => "## 本轮第 " + (index + 1) + " 批备忘录\n" + memo)
+    .join(String.fromCharCode(10, 10));
+  return [
+    "请使用已加载的 Lorn.NovelWriteSkills 文风蒸馏方法，把参考小说《" + input.sourceTitle + "》的现有文风指南更新到第 " + input.round + " 轮。本轮新读取了" + input.windowLabel + "，累计已覆盖前 " + input.coveredUntil + "/" + input.totalUnits + " " + input.unitName + "。",
+    "更新原则：现有指南来自本书前几轮样本，同样是有效证据，不要丢弃；新证据与现有条目一致时提升置信度，冲突时保留更有代表性的表述并说明分歧，新出现的稳定特征才新增条目。仍要覆盖句长与段落节奏、对白和心理描写模式、感官偏好、比喻来源域与修辞密度、叙事距离、禁忌词和去 AI 味约束。不要评价作品，不要复述大段原文，不要生成小说正文，不得把单轮样本中的偶然表达提升为硬规则。只输出完整的新版 Markdown《参考文风约束指南》，不要输出差异说明。",
+    "<current_style_guide>",
+    input.currentGuide,
+    "</current_style_guide>",
+    "<new_evidence_memos>",
+    evidence,
+    "</new_evidence_memos>",
+  ].join(String.fromCharCode(10, 10));
+}
+
 function evolutionPrompt(aiDraft: string, authorRevision: string, currentGuide: string): string {
   return `比较 AI 原稿与作者定稿，更新作者专属文风约束指南。必须分析作者增加、删除或替换的具体词汇，长短句偏好、句子连接和段落节奏，对话称呼、语气、潜台词和长度，以及感官、修辞、情绪表达和去 AI 味规则。只依据两份文本差异；样本不足时明确标注，不把单次修改提升为硬规则，不复制大段原文，不生成小说正文。只输出新版 Markdown《作者专属文风约束指南》。
 
@@ -174,39 +270,76 @@ async function callStyleModel(
   return boundedText(result.content, "模型返回的文风指南");
 }
 
+export interface StyleDistillationResult {
+  profile: StyleProfile;
+  coverage: StyleDistillationCoverage;
+  windowLabel: string;
+  round: number;
+  reachedEnd: boolean;
+}
+
 export async function distillReferenceStyle(input: {
   sourceId: string;
   selection: ModelSelection;
   restart?: boolean;
   onProgress?: (progress: StyleDistillationProgress) => void;
-}): Promise<StyleProfile> {
+}): Promise<StyleDistillationResult> {
   const source = await getStyleSource(input.sourceId);
   if (!source) throw new Error("参考书不存在");
+  if (input.restart) {
+    await Promise.all([
+      clearStyleDistillationCheckpoint(source.id),
+      clearStyleDistillationCoverage(source.id),
+    ]);
+  }
+  const storedCoverage = input.restart ? null : await getStyleDistillationCoverage(source.id);
+  // 换书或重新导入后哈希会变，旧进度不再可信，直接从头扫描。
+  const coverageValid = Boolean(storedCoverage && storedCoverage.contentHash === source.contentHash);
+  const coveredUntil = coverageValid ? storedCoverage?.coveredUntil ?? 0 : 0;
+  const previousRounds = coverageValid ? storedCoverage?.rounds ?? 0 : 0;
+
   input.onProgress?.({ stage: "sampling", completed: 0, total: 1, label: "正在读取全书章节分布" });
-  const [batches, rawInstructions] = await Promise.all([
-    readStyleSourceAnalysisBatches(source.id),
+  const previousCheckpoint = input.restart ? null : await getStyleDistillationCheckpoint(source.id);
+  const resumableWindow = previousCheckpoint
+    && previousCheckpoint.contentHash === source.contentHash
+    && previousCheckpoint.providerId === input.selection.provider.id
+    && previousCheckpoint.modelId === input.selection.model.id
+    && previousCheckpoint.windowStart >= coveredUntil
+    ? { start: previousCheckpoint.windowStart, count: previousCheckpoint.windowCount }
+    : null;
+  const [plan, rawInstructions] = await Promise.all([
+    // 断点存在时按它记录的窗口原样重放，避免续跑时换到另一段正文。
+    readStyleSourceAnalysisPlan({
+      sourceId: source.id,
+      coveredUntil,
+      window: resumableWindow,
+    }),
     getLornDistillationInstructions(),
   ]);
+  const window = plan.window;
+  if (!window) throw new Error("参考书中没有可分析的正文");
   const instructions = compactLornDistillationInstructions(rawInstructions, STYLE_MODEL_INSTRUCTION_CHARACTERS);
+  const unitName = plan.unitKind === "chapter" ? "章" : "段";
+  const round = previousRounds + 1;
   input.onProgress?.({
     stage: "sampling",
     completed: 1,
     total: 1,
-    label: `已抽取 ${batches.reduce((total, batch) => total + batch.passageCount, 0)} 个章节样本`,
+    label: `第 ${round} 轮：抽取${plan.windowLabel}，共 ${plan.passageCount} 个样本`,
   });
-  const previous = input.restart ? null : await getStyleDistillationCheckpoint(source.id);
-  const canResume = Boolean(previous
-    && previous.contentHash === source.contentHash
-    && previous.providerId === input.selection.provider.id
-    && previous.modelId === input.selection.model.id
-    && previous.batchCount === batches.length);
-  const memos: string[] = canResume ? previous?.completedMemos.slice(0, batches.length) ?? [] : [];
-  if (input.restart && previous) await clearStyleDistillationCheckpoint(source.id);
+
+  const batches = plan.batches;
+  const canResume = Boolean(resumableWindow
+    && previousCheckpoint
+    && previousCheckpoint.batchCount === batches.length
+    && previousCheckpoint.windowStart === window.start
+    && previousCheckpoint.windowCount === window.count);
+  const memos: string[] = canResume ? previousCheckpoint?.completedMemos.slice(0, batches.length) ?? [] : [];
   input.onProgress?.({
     stage: "analyzing",
     completed: memos.length,
     total: batches.length,
-    label: memos.length ? `从断点继续，已完成 ${memos.length} 批` : `准备分析 ${batches.length} 批章节样本`,
+    label: memos.length ? `从断点继续，已完成 ${memos.length} 批` : `准备分析 ${batches.length} 批样本`,
   });
   for (let index = memos.length; index < batches.length; index += 1) {
     const batch = batches[index];
@@ -224,12 +357,40 @@ export async function distillReferenceStyle(input: {
       providerId: input.selection.provider.id,
       modelId: input.selection.model.id,
       batchCount: batches.length,
+      windowStart: window.start,
+      windowCount: window.count,
       completedMemos: memos,
     });
     input.onProgress?.({ stage: "analyzing", completed: index + 1, total: batches.length, label: `已分析 ${batch.label}` });
   }
-  input.onProgress?.({ stage: "synthesizing", completed: 0, total: 1, label: "正在汇总文风指南" });
-  const guide = await callStyleModel(input.selection, distillationSynthesisPrompt(source.title, memos), instructions);
+
+  const nextCoveredUntil = Math.min(window.start + window.count, plan.totalUnits);
+  const currentGuide = coveredUntil > 0
+    ? (await listStyleProfilesForSource(source.id))[0]?.guide.trim() ?? ""
+    : "";
+  input.onProgress?.({
+    stage: "synthesizing",
+    completed: 0,
+    total: 1,
+    label: currentGuide ? `正在把第 ${round} 轮证据并入文风指南` : "正在汇总文风指南",
+  });
+  const guide = await callStyleModel(
+    input.selection,
+    currentGuide
+      ? distillationContinuationPrompt({
+        sourceTitle: source.title,
+        currentGuide,
+        memos,
+        windowLabel: plan.windowLabel,
+        coveredUntil: nextCoveredUntil,
+        totalUnits: plan.totalUnits,
+        unitName,
+        round,
+      })
+      : distillationSynthesisPrompt(source.title, memos),
+    instructions,
+  );
+
   input.onProgress?.({ stage: "saving", completed: 0, total: 1, label: "正在保存参考文风版本" });
   const profile = await createStyleProfileVersion({
     sourceId: source.id,
@@ -237,9 +398,33 @@ export async function distillReferenceStyle(input: {
     name: `《${source.title}》参考文风`,
     guide,
   });
+  const coverage: Omit<StyleDistillationCoverage, "updatedAt"> = {
+    version: 1,
+    sourceId: source.id,
+    contentHash: source.contentHash,
+    unitKind: plan.unitKind,
+    totalUnits: plan.totalUnits,
+    coveredUntil: nextCoveredUntil,
+    rounds: round,
+  };
+  await saveStyleDistillationCoverage(coverage);
   await clearStyleDistillationCheckpoint(source.id);
-  input.onProgress?.({ stage: "saving", completed: 1, total: 1, label: "参考文风版本已保存" });
-  return profile;
+  const reachedEnd = nextCoveredUntil >= plan.totalUnits;
+  input.onProgress?.({
+    stage: "saving",
+    completed: 1,
+    total: 1,
+    label: reachedEnd
+      ? `已覆盖全书 ${plan.totalUnits} ${unitName}，保存为 V${profile.version}`
+      : `已覆盖前 ${nextCoveredUntil}/${plan.totalUnits} ${unitName}，保存为 V${profile.version}`,
+  });
+  return {
+    profile,
+    coverage: { ...coverage, updatedAt: new Date().toISOString() },
+    windowLabel: plan.windowLabel,
+    round,
+    reachedEnd,
+  };
 }
 
 export async function evolveAuthorStyle(input: {
