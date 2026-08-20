@@ -10,32 +10,32 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.7.0
+当前正式版本：0.7.1
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.1
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.7.0 发布提交，以 v0.7.0 标签为准
-- 本轮审查基线：1a848fb feat(mobile): add runtime resources and authoring workflows
-- Release 标签：v0.7.0
+- 最新源码提交：本次 0.7.1 发布提交，以 v0.7.1 标签为准
+- 本轮审查基线：a335640 fix(mobile): finalize 0.7.0 release hardening
+- Release 标签：v0.7.1
 - Android applicationId：com.openfic.mobile
-- versionCode：7
-- versionName：0.7.0
+- versionCode：8
+- versionName：0.7.1
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.7.0.apk；APK 和密钥均被 Git 忽略
-- APK 大小：131,904,972 字节（125.79 MiB）
-- APK SHA-256：FB44317FCAABBD890110E60B332081C8102AE313C75F0931C507A7B7319C265C
+- Release APK：仓库根目录 OpenFicM-Android-0.7.1.apk；APK 和密钥均被 Git 忽略
+- APK 大小：132,463,528 字节（126.33 MiB）
+- APK SHA-256：1BB2CA9245DF999AAE41FCA68E531EE7D370394B239EE40002AC53EC6B4908B5
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.7.0 继续使用 0.6.0 的正式证书，因此可以直接覆盖升级。发布审查发现旧 Gradle 增量资源曾把两个已取消内置的 GGUF 重新带入 APK；正式脚本现会先删除受路径保护的 android/app/build 目录，并在复制产物前拒绝任何 .gguf 条目。最终 APK 已确认不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
+0.7.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版新增独立参考书库、Lorn 文风蒸馏、参考/作者文风版本、AI 原稿与作者定稿对比进化，以及助手和写作页的动态文风注入。正式脚本继续先删除受路径保护的 android/app/build 目录，并在复制产物前拒绝任何 .gguf 条目。最终 APK 已确认不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
 
 ## 3. 功能清单
 
@@ -75,6 +75,15 @@ GitHub 仓库：
 
 供应商支持 OpenAI-compatible、Google Gemini 和 Anthropic 风格请求。供应商配置包含 Base URL、API Key、模型名，并支持从供应商 API 获取模型列表。API Key 使用 expo-secure-store，SQLite 不保存明文 Key。
 
+### 文风系统
+
+- 独立文风书库支持 TXT、Markdown 和 EPUB，兼容 UTF-8、UTF-16、GB18030/GBK；原文件和规范化正文保存在应用私有目录。
+- 蒸馏从全书不同位置读取 6 段、每段最多 4,000 字符的样本，完整参考书不上传；样本会发送给用户配置的默认模型。
+- 参考文风与作品无关，可跨作品选择；作者文风按作品隔离，并保存递增版本。
+- 助手页和写作页都可选择创作文风；文风会注入主智能体和正文类子智能体。
+- `write_chapter`/`edit_chapter` 保存 AI 原稿和所用文风；作者实际修改并保存后，可在预览页进化当前作品的作者文风。
+- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.7.1 发布亮点见 `docs/releases/v0.7.1.md`。
+
 ### 本地检索
 
 - APK 不包含中文嵌入 GGUF 和重排 GGUF。首次启动从 Hugging Face 拉取到应用私有目录，临时文件完成大小和 SHA-256 校验后才安装。
@@ -91,15 +100,18 @@ GitHub 仓库：
 - src/screens/projects-screen.tsx：书架和作品入口。
 - src/screens/writing-screen.tsx：卷章目录、预览/编辑、保存和 Markdown 导出入口。
 - src/screens/assistant-screen.tsx：作品级助手会话、模型选择、消息编辑和重试。
+- src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考/作者文风版本和作品级选择。
 - src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。
 - src/agent/runtime.ts：Agent 主循环、工具调用、结构化提问、子 Agent 协作和 trace。
 - src/agent/tools.ts：移动端本地工具定义和执行边界。
 - src/llm/client.ts：供应商请求、响应归一化和 Gemini schema 兼容处理。
 - src/data/database.ts：Expo SQLite 初始化、迁移和事务。
 - src/data/repositories.ts：作品、卷、章节、角色、世界书、会话、消息、模型和设置仓储。
+- src/data/style-repositories.ts、chapter-draft-repositories.ts：参考书/文风版本和 AI 原稿快照仓储。
 - src/lib/export.ts：Markdown 导出；文件名清理、范围筛选、缓存文件和系统分享。
 - src/search：本地全文、嵌入和重排索引。
 - src/settings：默认设置、运行时 Agent/Skill 资源安装、Lorn 文风插件和 oh-story 内容更新。
+- src/style/source-library.ts：TXT/Markdown/EPUB 安全导入、编码识别、正文规范化和分布式抽样。
 - src/components：移动端通用 UI、错误提示、Agent trace 和输入控件。
 - assets/models：运行时模型来源、许可证和哈希说明；大 GGUF 不应被 Git 追踪。
 - android/app/build.gradle：Android 版本、签名环境变量和 Release 配置。
@@ -119,6 +131,7 @@ backend、frontend、desktop 是保留的 OpenFic 上游源码和兼容修复，
 6. 系统分享导出：导出文件写入 Expo cache，不申请外部存储权限，由 Android 分享/文件管理器决定最终保存位置。
 7. Gemini schema：function declaration 的每个参数必须有 type；React Native 侧递归补齐缺失类型并清理不支持的 additionalProperties，修复 chapter_ref 导致的 400；工具回合还必须原样带回 Gemini thoughtSignature。
 8. 供应链限制：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变提交 1a848fbe77f9952c38aac8c18240026154446114 并校验 SHA-256；oh-story 只按白名单读取 Markdown 并绑定 Release commit/tree/blob SHA，远程 Hook、脚本和 Git 配置不会执行。
+9. 文风边界：参考书是全局本地资料，参考文风可跨作品，作者文风只属于单部作品；蒸馏只向用户供应商发送有界样本，完整原文件不上传。
 
 ## 6. 构建与验证
 
@@ -156,7 +169,7 @@ $env:OPENFICM_RELEASE_KEY_PASSWORD = $password
 powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 ~~~
 
-脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.0.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
+脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.1.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
 
 ### 已完成的校验
 
@@ -165,9 +178,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - Gradle assembleRelease：BUILD SUCCESSFUL。
 - Release 脚本正式签名：成功。
 - apksigner：v2 签名验证通过，正式证书为 c5dd…f863。
-- aapt2：package com.openfic.mobile，versionCode 7，versionName 0.7.0，minSdk 28，targetSdk 36。
-- APK ZIP：仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录；最终大小 125.79 MiB。
-- APK SHA-256：FB44317FCAABBD890110E60B332081C8102AE313C75F0931C507A7B7319C265C。
+- aapt2：package com.openfic.mobile，versionCode 8，versionName 0.7.1，minSdk 28，targetSdk 36。
+- APK ZIP：内置 index.android.bundle，仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录；最终大小 126.33 MiB。
+- APK SHA-256：1BB2CA9245DF999AAE41FCA68E531EE7D370394B239EE40002AC53EC6B4908B5。
 - 固定提交上的 OpenFicM catalog 与 Lorn mobile catalog 已重新下载，SHA-256 均与代码常量一致。
 - verify-change：通过，设计文档已同步。
 - verify-quality：通过；仅报告已有 runtime.ts 和 repositories.ts 文件超过 500 行以及若干既有长行。
@@ -187,14 +200,14 @@ git push origin main
 正式 Release 使用 GitHub CLI：
 
 ~~~powershell
-gh release create v0.7.0 .\OpenFicM-Android-0.7.0.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.0" --notes-file notes.md --latest
+gh release create v0.7.1 .\OpenFicM-Android-0.7.1.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.1" --notes-file docs/releases/v0.7.1.md --latest
 ~~~
 
-不要把 notes.md、APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.0 和 gh release list 验证标签及资产。
+不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.1 和 gh release list 验证标签及资产。
 
 ## 8. 已知限制和后续重点
 
-- 当前没有在真我 GT7 或红米 K90 PRO MAX 上由开发环境实机回归；用户需要手动测试正式 APK 的安装、升级、分享导出、输入法、Agent 工具权限和本地模型加载。
+- 本轮 0.7.1 独立测试 APK 已由用户手动安装并确认通过；正式包仍需继续观察真我 GT7 和红米 K90 PRO MAX 上的长期创作、升级、分享导出及本地模型内存表现。
 - CPU-only 是当前环境的构建结果；旗舰手机性能足够，但首次加载 GGUF 仍可能需要时间和较多内存。
 - API 不可达时现在支持重试，但没有离线替代的云模型回答；本地作品编辑和本地检索仍可用。
 - Release 只提供 arm64-v8a；不应为了兼容旧 32 位设备引入额外 ABI，除非重新评估两个 GGUF 带来的体积。

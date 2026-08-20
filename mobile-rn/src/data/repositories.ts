@@ -205,9 +205,13 @@ export async function deleteProject(id: string): Promise<void> {
     await txn.runAsync("DELETE FROM chapter_fts WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM projects WHERE id = ?", id);
     await txn.runAsync(
-      "DELETE FROM app_settings WHERE key IN (?, ?)",
+      `DELETE FROM app_settings
+       WHERE key IN (?, ?, ?)
+          OR key = ?`,
       `assistant.activeSession.${id}`,
       `agent.pendingConsistency.${id}`,
+      `plugin.lorn-style-evolution.guide.${id}`,
+      `style.activeProfile.${id}`,
     );
   });
 }

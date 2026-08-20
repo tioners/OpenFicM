@@ -30,9 +30,21 @@ import {
   renameVolume,
   saveChapter,
 } from "@/data/repositories";
+import {
+  getPendingChapterStyleEvolution,
+  markChapterStyleEvolved,
+  recordLatestAuthorRevision,
+} from "@/data/chapter-draft-repositories";
+import {
+  getActiveStyleProfile,
+  listStyleProfiles,
+  setActiveStyleProfile,
+} from "@/data/style-repositories";
+import { resolveModelSelection } from "@/llm/selection";
+import { evolveAuthorStyle } from "@/settings/lorn-style-plugin";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
-import type { Chapter, Project, Volume } from "@/types";
+import type { Chapter, ChapterDraftSnapshot, Project, StyleProfile, Volume } from "@/types";
 
 const AUTO_SAVE_DELAY_MS = 1_000;
 
@@ -80,6 +92,11 @@ export function WritingScreen() {
   const [exportPickerVisible, setExportPickerVisible] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [activeStyleProfile, setActiveStyleProfileState] = useState<StyleProfile | null>(null);
+  const [stylePickerVisible, setStylePickerVisible] = useState(false);
+  const [pendingEvolution, setPendingEvolution] = useState<ChapterDraftSnapshot | null>(null);
+  const [evolvingStyle, setEvolvingStyle] = useState(false);
   const draftRef = useRef<DraftState>({ chapterId: "", title: "", content: "", dirty: false, version: 0 });
   const savingRef = useRef(false);
   const persistDraftRef = useRef<(force: boolean) => Promise<boolean>>(async () => true);
@@ -129,12 +146,20 @@ export function WritingScreen() {
     }
     setLoading(true);
     setError(null);
-    void Promise.all([getProject(projectId), listVolumes(projectId), listChapters(projectId)])
-      .then(([nextProject, nextVolumes, nextChapters]) => {
+    void Promise.all([
+      getProject(projectId),
+      listVolumes(projectId),
+      listChapters(projectId),
+      listStyleProfiles(projectId),
+      getActiveStyleProfile(projectId),
+    ])
+      .then(([nextProject, nextVolumes, nextChapters, nextStyleProfiles, nextActiveStyle]) => {
         if (cancelled) return;
         setProject(nextProject);
         setVolumes(nextVolumes);
         setChapters(nextChapters);
+        setStyleProfiles(nextStyleProfiles);
+        setActiveStyleProfileState(nextActiveStyle);
         const selectedId = useAppStore.getState().currentChapterId;
         if (!selectedId || !nextChapters.some((chapter) => chapter.id === selectedId)) {
           setCurrentChapter(nextChapters[0]?.id ?? null);
@@ -164,6 +189,9 @@ export function WritingScreen() {
       dirty: false,
       version: draftRef.current.version + 1,
     };
+    void getPendingChapterStyleEvolution(activeChapter.id)
+      .then(setPendingEvolution)
+      .catch((snapshotError) => setError(snapshotError instanceof Error ? snapshotError.message : String(snapshotError)));
   }, [activeChapter?.id, activeChapter?.updatedAt]);
 
   useEffect(() => {
@@ -194,6 +222,7 @@ export function WritingScreen() {
     try {
       const nextTitle = draft.title.trim() || "未命名章节";
       await saveChapter(draft.chapterId, nextTitle, draft.content);
+      const snapshot = await recordLatestAuthorRevision(draft.chapterId, draft.content);
       const updatedAt = new Date().toISOString();
       const savedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       setChapters((current) => current.map((chapter) => chapter.id === draft.chapterId
@@ -205,6 +234,7 @@ export function WritingScreen() {
         setDirty(false);
       }
       setSavedAt(savedTime);
+      setPendingEvolution(snapshot?.status === "revised" && snapshot.authorRevision !== snapshot.aiDraft ? snapshot : null);
       return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
@@ -405,6 +435,47 @@ export function WritingScreen() {
     if (await persistDraft(true)) setEditing(false);
   };
 
+  const chooseStyle = async (profile: StyleProfile | null) => {
+    if (!projectId || evolvingStyle) return;
+    setError(null);
+    try {
+      await setActiveStyleProfile(projectId, profile?.id ?? null);
+      setActiveStyleProfileState(profile);
+      setStylePickerVisible(false);
+    } catch (styleError) {
+      setError(styleError instanceof Error ? styleError.message : String(styleError));
+    }
+  };
+
+  const evolveFromRevision = async () => {
+    if (!projectId || !activeChapter || !pendingEvolution || evolvingStyle) return;
+    setEvolvingStyle(true);
+    setError(null);
+    try {
+      if (!await persistDraft(false)) return;
+      const selection = await resolveModelSelection();
+      const evolved = await evolveAuthorStyle({
+        projectId,
+        aiDraft: pendingEvolution.aiDraft,
+        authorRevision: pendingEvolution.authorRevision ?? content,
+        selection,
+      });
+      await markChapterStyleEvolved(pendingEvolution.id);
+      setStyleProfiles((current) => [
+        evolved.profile,
+        ...current.filter((profile) => profile.id !== evolved.profile.id),
+      ]);
+      setActiveStyleProfileState(evolved.profile);
+      setPendingEvolution(null);
+      refreshData();
+      Alert.alert("作者文风已进化", "已保存为“" + evolved.profile.name + " V" + evolved.profile.version + "”，后续创作将使用这个版本。");
+    } catch (evolutionError) {
+      setError(evolutionError instanceof Error ? evolutionError.message : String(evolutionError));
+    } finally {
+      setEvolvingStyle(false);
+    }
+  };
+
   const handleExport = async (scope: ExportScope) => {
     if (!project) return;
     const chapterId = activeChapter?.id;
@@ -463,6 +534,13 @@ export function WritingScreen() {
           </View>
           <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
         </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => setStylePickerVisible(true)} style={styles.styleSelector}>
+          <Ionicons name="color-wand-outline" size={17} color={activeStyleProfile ? colors.primary : colors.textMuted} />
+          <Text numberOfLines={1} style={[styles.styleSelectorText, activeStyleProfile && styles.styleSelectorTextActive]}>
+            {activeStyleProfile ? activeStyleProfile.name + " V" + activeStyleProfile.version : "不使用创作文风"}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+        </Pressable>
         {error ? <View style={styles.errorWrap}><ErrorNotice message={error} /></View> : null}
         {activeChapter ? (
           <View style={styles.editor}>
@@ -512,7 +590,12 @@ export function WritingScreen() {
                 </ScrollView>
                 <View style={styles.editorFooter}>
                   <Text style={styles.counter}>{dirty ? "正在保存修改..." : "预览模式"}</Text>
-                  {dirty ? <Button label="保存" onPress={() => { void persistDraft(true); }} disabled={saving} loading={saving} /> : null}
+                  <View style={styles.previewActions}>
+                    {pendingEvolution ? (
+                      <Button label="进化作者文风" variant="secondary" onPress={() => { void evolveFromRevision(); }} disabled={saving || evolvingStyle} loading={evolvingStyle} />
+                    ) : null}
+                    {dirty ? <Button label="保存" onPress={() => { void persistDraft(true); }} disabled={saving} loading={saving} /> : null}
+                  </View>
                 </View>
               </View>
             )}
@@ -529,6 +612,43 @@ export function WritingScreen() {
           />
         )}
       </KeyboardAvoidingView>
+
+      <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setStylePickerVisible(false)}>
+          <View style={styles.actionSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.exportHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>选择创作文风</Text>
+                <Text style={styles.styleSheetMeta}>会用于助手后续生成或修改正文</Text>
+              </View>
+              <Pressable accessibilityLabel="关闭文风列表" onPress={() => setStylePickerVisible(false)} style={styles.iconButton}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView style={styles.styleList} contentContainerStyle={styles.styleListContent}>
+              <Pressable onPress={() => void chooseStyle(null)} style={[styles.styleOption, !activeStyleProfile && styles.styleOptionActive]}>
+                <Ionicons name={!activeStyleProfile ? "radio-button-on" : "radio-button-off"} size={20} color={!activeStyleProfile ? colors.primary : colors.textMuted} />
+                <View style={styles.styleOptionCopy}>
+                  <Text style={styles.styleOptionTitle}>不使用文风</Text>
+                  <Text style={styles.styleOptionMeta}>只遵循本轮要求与作品设定</Text>
+                </View>
+              </Pressable>
+              {styleProfiles.map((profile) => {
+                const selected = profile.id === activeStyleProfile?.id;
+                return (
+                  <Pressable key={profile.id} onPress={() => void chooseStyle(profile)} style={[styles.styleOption, selected && styles.styleOptionActive]}>
+                    <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
+                    <View style={styles.styleOptionCopy}>
+                      <Text style={styles.styleOptionTitle} numberOfLines={1}>{profile.name} V{profile.version}</Text>
+                      <Text style={styles.styleOptionMeta}>{profile.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal visible={chapterPickerVisible} transparent animationType="slide" onRequestClose={() => setChapterPickerVisible(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setChapterPickerVisible(false)}>
@@ -741,6 +861,9 @@ const styles = StyleSheet.create({
   chapterPickerTextGroup: { flex: 1, minWidth: 0, gap: 2 },
   chapterPickerVolume: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
   chapterPickerText: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  styleSelector: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, backgroundColor: colors.surface },
+  styleSelectorText: { flex: 1, color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  styleSelectorTextActive: { color: colors.primary },
   errorWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   editor: { flex: 1, padding: spacing.lg, gap: spacing.md },
   preview: { flex: 1, gap: spacing.md },
@@ -755,7 +878,8 @@ const styles = StyleSheet.create({
   previewText: { minHeight: 220, color: colors.text },
   titleInput: { color: colors.text, fontSize: 22, fontWeight: "700", paddingVertical: spacing.sm },
   contentInput: { flex: 1, minHeight: 220, color: colors.text, fontSize: 17, lineHeight: 28, padding: 0 },
-  editorFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  editorFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.md },
+  previewActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
   counter: { flex: 1, color: colors.textMuted, fontSize: 12 },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   centeredBackdrop: { flex: 1, justifyContent: "center", padding: spacing.lg, backgroundColor: colors.overlay },
@@ -779,6 +903,14 @@ const styles = StyleSheet.create({
   },
   sheetHeaderActions: { flexDirection: "row", alignItems: "center" },
   sheetTitle: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  styleSheetMeta: { marginTop: 2, color: colors.textMuted, fontSize: 12 },
+  styleList: { maxHeight: 420 },
+  styleListContent: { paddingBottom: spacing.sm },
+  styleOption: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  styleOptionActive: { backgroundColor: colors.surfaceMuted },
+  styleOptionCopy: { flex: 1, minWidth: 0 },
+  styleOptionTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  styleOptionMeta: { marginTop: 3, color: colors.textMuted, fontSize: 12 },
   directoryList: { paddingBottom: spacing.lg },
   volumeHeader: {
     minHeight: 50,

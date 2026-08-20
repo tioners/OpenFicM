@@ -2,6 +2,8 @@
 
 这是 OpenFicM 的 React Native Android 工程。应用不依赖电脑后端，业务数据保存在本机 SQLite，API Key 保存在 Android SecureStore。
 
+面向普通用户的安装、模型配置、Agent、文风、导出和故障排查说明见 [Android 使用说明](../docs/USER_GUIDE.md)，0.7.1 更新内容见 [版本说明](../docs/releases/v0.7.1.md)。
+
 ## 开发
 
 ~~~powershell
@@ -31,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 - OPENFICM_RELEASE_LEGACY_KEY_ALIAS（使用 lineage 时必需）
 - OPENFICM_RELEASE_LEGACY_KEY_PASSWORD（使用 lineage 时必需）
 
-Release 构建缺少前四项时会直接失败；使用 lineage 时必须同时提供旧签名者的四项配置，否则构建会明确失败。本地开发请使用 `npm run android:apk:debug`。不得提交 keystore、密码、签名轮换链、APK 或 GGUF。
+Release 构建缺少前四项时会直接失败；使用 lineage 时必须同时提供旧签名者的四项配置，否则构建会明确失败。本地手动安装测试使用 `npm run android:apk:debug`，它构建内置 JS 且无需 Metro 的 `standalone` APK并使用调试证书。不得把该 APK 用于发布，也不得提交 keystore、密码、签名轮换链、APK 或 GGUF。
 
 ## 网络边界
 
@@ -39,5 +41,13 @@ Release 构建缺少前四项时会直接失败；使用 lineage 时必须同时
 - 模型发现：读取供应商模型列表
 - 运行资源：从 OpenFicM GitHub、oh-story GitHub Release、Lorn.NovelWriteSkills 固定 commit 和 Hugging Face 获取，下载不执行远程脚本或 Hook
 - oh-story 更新：只读取正式 Release 和白名单 Markdown，绑定不可变 commit/tree SHA
+
+## 文风工作流
+
+- 文风书库接受 TXT、Markdown 和 EPUB；原文件及规范化正文保存在应用私有目录。
+- 蒸馏只把分布式抽样文本发送给用户配置的默认模型，完整参考书不会上传。
+- 参考文风可跨作品选择；作者文风按作品保存多个版本。助手生成正文前会在尚未选择时询问，写作页和助手页也可直接切换。
+- Agent 创建或重写章节时保存 AI 原稿与所用文风；作者修改后可在写作页生成新的作者文风版本。
+- Android 运行时不使用 FastAPI、服务地址、Socket.IO 或电脑后端。
 
 详细架构见 DESIGN.md，第三方声明见 ../THIRD_PARTY_NOTICES.md。

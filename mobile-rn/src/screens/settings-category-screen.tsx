@@ -57,11 +57,6 @@ import {
 } from "@/settings/oh-story-updater";
 import { colors, radius, spacing } from "@/theme";
 import type { Model } from "@/types";
-import {
-  getAuthorStyleGuide,
-  LORN_STYLE_ENDPOINT_KEY,
-  saveAuthorStyleGuide,
-} from "@/settings/lorn-style-plugin";
 
 export type SettingsCategory =
   | "general"
@@ -144,8 +139,6 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const [autoSaveDelay, setAutoSaveDelay] = useState("1000");
   const [editorFontSize, setEditorFontSize] = useState("17");
   const [requestTimeout, setRequestTimeout] = useState("120000");
-  const [authorStyleGuide, setAuthorStyleGuide] = useState("");
-  const [styleEndpoint, setStyleEndpoint] = useState("");
   const [ohStoryState, setOhStoryState] = useState<OhStoryUpdateState>(EMPTY_OH_STORY_STATE);
   const [ohStoryProgress, setOhStoryProgress] = useState("");
   const [ohStoryBusy, setOhStoryBusy] = useState(false);
@@ -157,7 +150,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
     setLoading(true);
     setError(null);
     try {
-      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, autoSave, fontSize, timeout, nextModels, nextOhStoryState, nextStyleGuide, nextStyleEndpoint, nextResourceState] = await Promise.all([
+      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, autoSave, fontSize, timeout, nextModels, nextOhStoryState, nextResourceState] = await Promise.all([
         getIndexSettings(),
         getAgentRules(),
         getAgentSkills(),
@@ -171,8 +164,6 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
         getSetting("connections.requestTimeout"),
         listModels(),
         getOhStoryUpdateState(),
-        projectId ? getAuthorStyleGuide(projectId) : Promise.resolve(""),
-        getSetting(LORN_STYLE_ENDPOINT_KEY),
         getRuntimeResourceState(),
       ]);
       setIndexSettings(nextIndex);
@@ -193,8 +184,6 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       setRequestTimeout(timeout ?? "120000");
       setAvailableModels(nextModels);
       setOhStoryState(nextOhStoryState);
-      setAuthorStyleGuide(nextStyleGuide);
-      setStyleEndpoint(nextStyleEndpoint ?? "");
       setResourceState(nextResourceState);
       if (projectId) setIndexStats(await getProjectIndexStats(projectId));
     } catch (loadError) {
@@ -213,26 +202,6 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
     setError(null);
     try {
       await setSetting(key, value);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveStyleGuide = async () => {
-    if (!projectId) {
-      setError("请先从书架打开一部作品");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await Promise.all([
-        saveAuthorStyleGuide(projectId, authorStyleGuide),
-        setSetting(LORN_STYLE_ENDPOINT_KEY, styleEndpoint.trim()),
-      ]);
-      refreshData();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
@@ -549,25 +518,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       ) : null}
       {category === "style" ? (
         <View style={styles.section}>
-          <SettingRow label="当前范围" value={projectId ? "当前书架作品" : "尚未选择作品"} />
-          <Field
-            label="作者专属文风约束指南"
-            value={authorStyleGuide}
-            onChangeText={setAuthorStyleGuide}
-            multiline
-            maxLength={100000}
-            style={styles.styleGuideInput}
-            placeholder="可手动编辑，或在助手中使用“蒸馏文风”“更新我的文风”生成"
-          />
-          <Field
-            label="文风进化服务地址（可选）"
-            value={styleEndpoint}
-            onChangeText={setStyleEndpoint}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="例如 http://192.168.1.2:8000；留空使用当前模型"
-          />
-          <Button label="保存文风设置" onPress={() => void saveStyleGuide()} disabled={!projectId || saving} loading={saving} />
+          <SettingRow label="文风书库" value="请从设置菜单重新进入" />
         </View>
       ) : null}
       {category === "agent-tools" ? (
@@ -743,7 +694,6 @@ const styles = StyleSheet.create({
   manageText: { flex: 1, minWidth: 0, gap: spacing.xs },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   multiline: { minHeight: 120 },
-  styleGuideInput: { minHeight: 260 },
   progressText: { color: colors.primary, fontSize: 13 },
   statusText: { color: colors.textMuted, fontSize: 13 },
   modelHint: { color: colors.primary, fontSize: 12 },

@@ -6,7 +6,11 @@ import {
   shouldAttachLornStyleSkills,
 } from "./lorn-style-plugin";
 import { getInstalledOhStoryPackage } from "./oh-story-updater";
-import { getInstalledLornStylePackage, getInstalledOpenFicMCatalog } from "./remote-resources";
+import {
+  compactLornDistillationInstructions,
+  getInstalledLornStylePackage,
+  getInstalledOpenFicMCatalog,
+} from "./remote-resources";
 
 export type ToolPermissionMode = "allow" | "ask" | "deny";
 export type AgentKind = "primary" | "subagent";
@@ -73,6 +77,12 @@ export const TOOL_CATALOG = [
   { key: "activate_skill", name: "激活技能", readonly: true },
   { key: "delegate_agent", name: "委派子智能体", readonly: true },
   { key: "read_author_style_guide", name: "读取作者文风指南", readonly: true },
+  { key: "list_style_sources", name: "列出参考书", readonly: true },
+  { key: "read_style_source_sample", name: "读取参考书样本", readonly: true },
+  { key: "list_style_profiles", name: "列出文风版本", readonly: true },
+  { key: "read_style_profile", name: "读取文风版本", readonly: true },
+  { key: "select_style_profile", name: "切换创作文风", readonly: false },
+  { key: "save_reference_style_profile", name: "保存参考文风", readonly: false },
   { key: "write_chapter", name: "创建章节", readonly: false },
   { key: "edit_chapter", name: "修改章节", readonly: false },
   { key: "create_character", name: "创建角色", readonly: false },
@@ -231,13 +241,42 @@ function attachPluginSkills(agent: AgentDefinition): AgentDefinition {
   };
 }
 
+function adaptLornStyleSkill(skill: AgentSkill): AgentSkill {
+  if (skill.id === "plugin-lorn-style--distillation") {
+    return {
+      ...skill,
+      name: "Lorn 原版参考文风蒸馏",
+      description: "读取文风书库中的参考小说样本，使用 Lorn.NovelWriteSkills 方法生成独立参考文风版本。",
+      instructions: compactLornDistillationInstructions(skill.instructions
+        .replace(
+          /原文中的 Agents\.md 注册、蒸馏产物目录和作者风格模板文件统一映射为 save_author_style_guide；最终必须把完整 Markdown 指南保存到当前作品。/g,
+          "原文中的 Agents.md 注册、蒸馏产物目录和作者风格模板文件统一映射为 OpenFicM 文风书库。",
+        )
+        .replace(
+          /完成蒸馏后必须调用 save_author_style_guide 保存完整结果。/g,
+          "先调用 list_style_sources 和 read_style_source_sample 读取用户选择的参考书，完成蒸馏后调用 save_reference_style_profile 保存独立参考文风版本。",
+        )),
+    };
+  }
+  if (skill.id === "plugin-lorn-style--evolution") {
+    return {
+      ...skill,
+      instructions: skill.instructions.replace(
+        /该工具会读取现有指南，优先调用已配置的 Lorn FastAPI 插件接口，未配置接口时使用当前模型完成对比，并把新版指南保存到当前作品。/g,
+        "该工具会读取现有作者文风，使用当前模型完成对比，并把新版指南保存为当前作品的新作者文风版本，不需要电脑后端。",
+      ),
+    };
+  }
+  return skill;
+}
+
 export async function getAgentSkills(): Promise<AgentSkill[]> {
   const [value, openFicMCatalog, lornPackage, remotePackage] = await Promise.all([readJson("agent.skills"), getInstalledOpenFicMCatalog(), getInstalledLornStylePackage(), getInstalledOhStoryPackage()]);
   const records = Array.isArray(value) ? value.filter(isRecord) : [];
   const overrides = new Map(records.filter((item) => typeof item.id === "string").map((item) => [item.id as string, item]));
   const managedBuiltins = (openFicMCatalog?.skills ?? []).map((skill) => ({ ...skill, source: "builtin" as const }));
   const builtinIds = new Set(managedBuiltins.map((skill) => skill.id));
-  const pluginSkills = (lornPackage?.skills ?? []).map((skill) => ({ ...skill, source: "plugin" as const }));
+  const pluginSkills = (lornPackage?.skills ?? []).map((skill) => adaptLornStyleSkill({ ...skill, source: "plugin" as const }));
   const pluginIds = new Set(pluginSkills.map((skill) => skill.id));
   const builtins = managedBuiltins.map((skill) => {
     const override = overrides.get(skill.id);

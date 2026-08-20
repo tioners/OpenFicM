@@ -13,6 +13,7 @@ import { CharactersScreen } from "@/screens/characters-screen";
 import { AssistantScreen } from "@/screens/assistant-screen";
 import { ProjectsScreen } from "@/screens/projects-screen";
 import { SettingsScreen } from "@/screens/settings-screen";
+import { StyleLibraryScreen } from "@/screens/style-library-screen";
 import { WritingScreen } from "@/screens/writing-screen";
 import { WorldInfoScreen } from "@/screens/world-info-screen";
 import { colors } from "@/theme";
@@ -172,6 +173,7 @@ function RuntimeResourceGate() {
         <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="Characters" component={CharactersScreen} />
         <Stack.Screen name="WorldInfo" component={WorldInfoScreen} />
+        <Stack.Screen name="StyleLibrary" component={StyleLibraryScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -116,6 +116,13 @@ export function ProjectsScreen() {
                 <Ionicons name="globe-outline" size={22} color={currentProjectId ? colors.primary : colors.textMuted} />
                 <Text style={styles.quickActionText}>世界书</Text>
               </Pressable>
+              <Pressable
+                onPress={() => rootNavigation.navigate("StyleLibrary")}
+                style={styles.quickAction}
+              >
+                <Ionicons name="color-wand-outline" size={22} color={colors.primary} />
+                <Text style={styles.quickActionText}>文风库</Text>
+              </Pressable>
             </View>
             {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={() => void loadProjects()} /></View> : null}
           </View>

@@ -97,6 +97,45 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS style_sources (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      format TEXT NOT NULL,
+      file_uri TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      content_hash TEXT NOT NULL UNIQUE,
+      character_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS style_profiles (
+      id TEXT PRIMARY KEY NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      source_id TEXT REFERENCES style_sources(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      guide TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(series_id, version)
+    );
+
+    CREATE TABLE IF NOT EXISTS chapter_drafts (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      chapter_id TEXT NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+      style_profile_id TEXT REFERENCES style_profiles(id) ON DELETE SET NULL,
+      ai_draft TEXT NOT NULL,
+      author_revision TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS chapter_fts USING fts5(
       chapter_id UNINDEXED,
       project_id UNINDEXED,
@@ -197,6 +236,14 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
       ON volumes(project_id, order_index);
     CREATE INDEX IF NOT EXISTS idx_chapters_volume_order
       ON chapters(volume_id, order_index);
+    CREATE INDEX IF NOT EXISTS idx_style_sources_updated
+      ON style_sources(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_style_profiles_scope_updated
+      ON style_profiles(kind, project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_style_profiles_source_version
+      ON style_profiles(source_id, version DESC);
+    CREATE INDEX IF NOT EXISTS idx_chapter_drafts_chapter_updated
+      ON chapter_drafts(chapter_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_project_created
       ON chat_messages(project_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_characters_project_updated
@@ -205,6 +252,37 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
       ON world_info_entries(world_info_id, entry_order);
     CREATE INDEX IF NOT EXISTS idx_vector_chunks_project_source
       ON vector_chunks(project_id, source_type, source_id);
+  `);
+  await database.execAsync(`
+    INSERT OR IGNORE INTO style_profiles(
+      id, series_id, project_id, source_id, kind, name, version, guide, created_at, updated_at
+    )
+    SELECT
+      'legacy-author-' || project.id,
+      'author-' || project.id,
+      project.id,
+      NULL,
+      'author',
+      '我的作者文风',
+      1,
+      setting.value,
+      project.updated_at,
+      project.updated_at
+    FROM projects project
+    JOIN app_settings setting
+      ON setting.key = 'plugin.lorn-style-evolution.guide.' || project.id
+    WHERE TRIM(setting.value) <> '';
+
+    INSERT OR IGNORE INTO app_settings(key, value)
+    SELECT
+      'style.activeProfile.' || project.id,
+      'legacy-author-' || project.id
+    FROM projects project
+    JOIN style_profiles profile
+      ON profile.id = 'legacy-author-' || project.id;
+
+    DELETE FROM app_settings
+    WHERE key LIKE 'plugin.lorn-style-evolution.guide.%';
   `);
   await migrateChatSessions(database);
 }

@@ -35,6 +35,11 @@ import {
   setSetting,
   updateChatSession,
 } from "@/data/repositories";
+import {
+  getActiveStyleProfile,
+  listStyleProfiles,
+  setActiveStyleProfile,
+} from "@/data/style-repositories";
 import type { RootTabParamList } from "@/navigation/types";
 import { getAgentDefinitions } from "@/settings/config";
 import { useAppStore } from "@/store/app-store";
@@ -49,6 +54,7 @@ import type {
   ModelSelection,
   Project,
   Provider,
+  StyleProfile,
 } from "@/types";
 
 function requestToolApproval(name: string, args: Record<string, unknown>): Promise<boolean> {
@@ -168,6 +174,8 @@ export function AssistantScreen() {
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [activeAgentName, setActiveAgentName] = useState("Build");
+  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [activeStyleProfile, setActiveStyleProfileState] = useState<StyleProfile | null>(null);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -175,6 +183,8 @@ export function AssistantScreen() {
   const [error, setError] = useState<string | null>(null);
   const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
   const [modelPickerVisible, setModelPickerVisible] = useState(false);
+  const [stylePickerVisible, setStylePickerVisible] = useState(false);
+  const [updatingStyle, setUpdatingStyle] = useState(false);
   const [liveTrace, setLiveTrace] = useState<AgentRunTrace | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<AgentClarificationRequest | null>(null);
   const [retryRequest, setRetryRequest] = useState<RetryRequest | null>(null);
@@ -206,6 +216,8 @@ export function AssistantScreen() {
       setDefaultModelId(null);
       setActiveAgentId(null);
       setActiveAgentName("Build");
+      setStyleProfiles([]);
+      setActiveStyleProfileState(null);
       setSelection(null);
       setLiveTrace(null);
       cancelPendingQuestion();
@@ -215,7 +227,18 @@ export function AssistantScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [nextProject, storedSessions, preferredSessionId, activeModelId, nextModels, nextProviders, activeAgentId, agents] = await Promise.all([
+      const [
+        nextProject,
+        storedSessions,
+        preferredSessionId,
+        activeModelId,
+        nextModels,
+        nextProviders,
+        activeAgentId,
+        agents,
+        nextStyleProfiles,
+        nextActiveStyleProfile,
+      ] = await Promise.all([
         getProject(projectId),
         listChatSessions(projectId),
         getSetting(activeSessionSettingKey(projectId)),
@@ -224,6 +247,8 @@ export function AssistantScreen() {
         listProviders(),
         getSetting("agent.activeDefinitionId"),
         getAgentDefinitions(),
+        listStyleProfiles(projectId),
+        getActiveStyleProfile(projectId),
       ]);
       if (!nextProject) throw new Error("作品不存在");
       const activeAgent = agents.find((agent) => agent.id === activeAgentId && agent.enabled && agent.kind === "primary")
@@ -262,6 +287,8 @@ export function AssistantScreen() {
       setDefaultModelId(nextDefaultModelId);
       setActiveAgentId(activeAgent?.id ?? null);
       setActiveAgentName(activeAgent?.name ?? "Build");
+      setStyleProfiles(nextStyleProfiles);
+      setActiveStyleProfileState(nextActiveStyleProfile);
       setSelection(nextSelection);
       setError(selectionError);
     } catch (loadError) {
@@ -354,6 +381,21 @@ export function AssistantScreen() {
       setModelPickerVisible(false);
     } catch (modelError) {
       setError(modelError instanceof Error ? modelError.message : String(modelError));
+    }
+  };
+
+  const chooseStyle = async (profile: StyleProfile | null) => {
+    if (!projectId || sending || updatingStyle) return;
+    setUpdatingStyle(true);
+    setError(null);
+    try {
+      await setActiveStyleProfile(projectId, profile?.id ?? null);
+      setActiveStyleProfileState(profile);
+      setStylePickerVisible(false);
+    } catch (styleError) {
+      setError(styleError instanceof Error ? styleError.message : String(styleError));
+    } finally {
+      setUpdatingStyle(false);
     }
   };
 
@@ -590,6 +632,22 @@ export function AssistantScreen() {
           <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
         </Pressable>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={sending || updatingStyle}
+        onPress={() => setStylePickerVisible(true)}
+        style={styles.styleSelector}
+      >
+        {updatingStyle ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Ionicons name="color-wand-outline" size={17} color={activeStyleProfile ? colors.primary : colors.textMuted} />
+        )}
+        <Text style={[styles.styleSelectorText, activeStyleProfile && styles.styleSelectorTextActive]} numberOfLines={1}>
+          {activeStyleProfile ? `${activeStyleProfile.name} V${activeStyleProfile.version}` : "不使用创作文风"}
+        </Text>
+        <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+      </Pressable>
       <Pressable accessibilityRole="button" disabled={sending} onPress={() => setSessionPickerVisible(true)} style={styles.sessionSelector}>
         <Ionicons name="chatbubble-outline" size={17} color={colors.textMuted} />
         <Text style={styles.sessionTitle} numberOfLines={1}>{activeSession?.title ?? "新对话"}</Text>
@@ -777,6 +835,47 @@ export function AssistantScreen() {
           </View>
         </Pressable>
       </Modal>
+      <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setStylePickerVisible(false)}>
+          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetTitleWrap}>
+                <Text style={styles.sheetTitle}>选择创作文风</Text>
+                <Text style={styles.sheetSubtitle}>{project?.title ?? "当前作品"}</Text>
+              </View>
+              <Pressable accessibilityLabel="关闭文风列表" onPress={() => setStylePickerVisible(false)} style={styles.iconButton}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={styleProfiles}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.sheetList}
+              ListHeaderComponent={(
+                <Pressable onPress={() => void chooseStyle(null)} style={[styles.sheetRow, !activeStyleProfile && styles.sheetRowActive]}>
+                  <Ionicons name={!activeStyleProfile ? "radio-button-on" : "radio-button-off"} size={20} color={!activeStyleProfile ? colors.primary : colors.textMuted} />
+                  <View style={styles.sheetRowText}>
+                    <Text style={styles.sheetRowTitle}>不使用文风</Text>
+                    <Text style={styles.sheetRowMeta}>仅遵循作品设定和本轮要求</Text>
+                  </View>
+                </Pressable>
+              )}
+              renderItem={({ item }) => {
+                const selected = item.id === activeStyleProfile?.id;
+                return (
+                  <Pressable onPress={() => void chooseStyle(item)} style={[styles.sheetRow, selected && styles.sheetRowActive]}>
+                    <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
+                    <View style={styles.sheetRowText}>
+                      <Text style={styles.sheetRowTitle} numberOfLines={1}>{item.name} V{item.version}</Text>
+                      <Text style={styles.sheetRowMeta}>{item.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        </Pressable>
+      </Modal>
       <AgentQuestionSheet
         request={pendingQuestion}
         onSubmit={(answers) => finishQuestion({ answers, cancelled: false })}
@@ -815,6 +914,18 @@ const styles = StyleSheet.create({
   },
   modelSelectorText: { flexShrink: 1, color: colors.primary, fontSize: 13, fontWeight: "700" },
   mutedText: { color: colors.textMuted },
+  styleSelector: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  styleSelectorText: { flex: 1, minWidth: 0, color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  styleSelectorTextActive: { color: colors.primary },
   sessionSelector: {
     minHeight: 42,
     flexDirection: "row",

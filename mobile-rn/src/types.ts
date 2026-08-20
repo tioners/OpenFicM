@@ -25,6 +25,50 @@ export interface Chapter {
   updatedAt: string;
 }
 
+export type StyleSourceFormat = "txt" | "markdown" | "epub";
+
+export interface StyleSource {
+  id: string;
+  title: string;
+  fileName: string;
+  format: StyleSourceFormat;
+  fileUri: string;
+  sizeBytes: number;
+  contentHash: string;
+  characterCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StyleProfileKind = "reference" | "author";
+
+export interface StyleProfile {
+  id: string;
+  seriesId: string;
+  projectId: string | null;
+  sourceId: string | null;
+  kind: StyleProfileKind;
+  name: string;
+  version: number;
+  guide: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ChapterDraftStatus = "generated" | "revised" | "evolved";
+
+export interface ChapterDraftSnapshot {
+  id: string;
+  projectId: string;
+  chapterId: string;
+  styleProfileId: string | null;
+  aiDraft: string;
+  authorRevision: string | null;
+  status: ChapterDraftStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Provider {
   id: string;
   name: string;

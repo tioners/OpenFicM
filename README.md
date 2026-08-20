@@ -8,10 +8,25 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 
 前往 [GitHub Releases](https://github.com/tioners/OpenFicM/releases) 下载 APK。
 
-- 当前版本：0.7.0
+- 当前版本：0.7.1
 - Android 9.0 及以上
 - 仅提供 arm64-v8a，适用于主流 64 位 Android 手机
 - 官方 APK 当前签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
+
+## 使用文档
+
+- [Android 完整使用说明](docs/USER_GUIDE.md)
+- [0.7.1 版本说明与亮点](docs/releases/v0.7.1.md)
+
+## 优势亮点
+
+- **无需电脑后端**：不依赖 FastAPI、Socket.IO 或 Metro，安装后直接在手机使用。
+- **本地优先与作品隔离**：作品、对话、角色、世界书、文风和索引保存在手机，不同作品互不串线。
+- **真正的 Agent 协作**：智能体可激活 Skill、调用工具、委派子智能体，并按权限更新章节和设定。
+- **完整文风闭环**：参考书导入与蒸馏、创作文风选择、AI 原稿记录、作者定稿对比和作者文风进化。
+- **供应商自由**：支持 OpenAI-compatible、Google Gemini、Anthropic 和自定义 Base URL。
+- **本地语义检索**：中文嵌入和重排模型在手机运行，不需要外部向量数据库。
+- **移动端创作逻辑**：预览优先、卷章目录、自动保存、输入法避让、失败重试和系统分享导出。
 
 ## 功能
 
@@ -26,7 +41,8 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 - 首次启动一键拉取并校验 OpenFicM Agent/Skill、oh-story 内容、Lorn 文风 Skill 和本地检索模型
 - 章节变化后的角色与世界书一致性检查
 - Gemini functionDeclaration 参数 schema 兼容修复
-- Lorn 文风蒸馏与进化插件：作品级作者文风指南、正文动态注入和可选 FastAPI 对比服务
+- 独立文风书库：导入 TXT、Markdown 或 EPUB，使用当前默认模型按 Lorn 方法蒸馏参考文风
+- AI 原稿与作者定稿关联、作品级作者文风版本进化、助手与写作页动态选择和注入文风
 - 角色库与世界书支持单条或批量导出为 JSON、Markdown
 - 助手完成消息支持复制与重新生成，失败任务支持持久化重试和原始错误详情
 
@@ -48,7 +64,7 @@ APK 不包含 GGUF、基础 Agent/Skill 或 Lorn Skill。首次启动会显示�
 
 正式构建脚本会先清理 `android/app/build` 生成目录，并在复制产物前拒绝任何 GGUF 条目，防止旧增量资源重新进入 APK。
 
-Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STORE_PASSWORD`、`OPENFICM_RELEASE_KEY_ALIAS` 和 `OPENFICM_RELEASE_KEY_PASSWORD`。本地开发请使用 `npm run android:apk:debug`，避免误用调试证书发布。
+Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STORE_PASSWORD`、`OPENFICM_RELEASE_KEY_ALIAS` 和 `OPENFICM_RELEASE_KEY_PASSWORD`。本地手动测试请使用 `npm run android:apk:debug`；该任务生成内置 JS、无需 Metro 的 `standalone` APK，并使用调试证书，禁止用于正式发布。
 
 密钥轮换时除 `OPENFICM_RELEASE_LINEAGE_FILE` 外，还必须提供旧签名者的
 `OPENFICM_RELEASE_LEGACY_STORE_FILE`、`OPENFICM_RELEASE_LEGACY_STORE_PASSWORD`、
@@ -71,6 +87,7 @@ OpenFicM-Android-<version>.apk
 
 - [syrizelink/OpenFic](https://github.com/syrizelink/OpenFic)：原项目、产品设计和桌面端 Agent 体系，Apache-2.0
 - [worldwonderer/oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode)：写作 Skill 与子智能体内容来源，MIT
+- [lornshrimp/Lorn.NovelWriteSkills](https://github.com/lornshrimp/Lorn.NovelWriteSkills)：参考文风蒸馏方法与白名单资料来源；上游固定提交的仓库根目录未声明许可证，详见第三方声明
 - [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) 与 [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base)：本地检索模型
 
 ## 社区

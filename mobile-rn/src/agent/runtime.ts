@@ -14,8 +14,13 @@ import {
 } from "@/settings/config";
 import { getProviderApiKey, getSetting, listModels, listProviders, setSetting } from "@/data/repositories";
 import {
+  getActiveStyleProfile,
+  getActiveStyleSelection,
+  listStyleProfiles,
+  setActiveStyleProfile,
+} from "@/data/style-repositories";
+import {
   evolveAuthorStyle,
-  getAuthorStyleGuide,
   shouldInjectAuthorStyleGuide,
 } from "@/settings/lorn-style-plugin";
 import type {
@@ -27,6 +32,7 @@ import type {
   ChatMessage,
   ModelSelection,
   Project,
+  StyleProfile,
 } from "@/types";
 
 import { agentTools, executeAgentTool } from "./tools";
@@ -58,7 +64,9 @@ type RuntimeCatalog = {
   permissions: Record<string, ToolPermissionMode>;
   historyLimit: number;
   compressSystemPrompts: boolean;
-  authorStyleGuide: string;
+  styleSelectionConfigured: boolean;
+  activeStyleProfile: StyleProfile | null;
+  availableStyleProfiles: StyleProfile[];
 };
 
 type LoopResult = {
@@ -227,6 +235,12 @@ function toolResultDetail(name: string, result: Record<string, unknown>): string
   if (name === "read_character") return `已读取角色：${isRecord(result.character) ? String(result.character.name ?? "") : ""}`.trim();
   if (name === "read_world_entry") return `已读取世界书：${isRecord(result.entry) ? String(result.entry.name ?? "") : ""}`.trim();
   if (name === "read_author_style_guide") return result.exists === true ? "已读取作者文风指南" : "当前作品尚无作者文风指南";
+  if (name === "list_style_sources") return `已读取 ${count("sources")} 本参考书`;
+  if (name === "list_style_profiles") return `已读取 ${count("profiles")} 个文风版本`;
+  if (name === "read_style_source_sample") return `已读取参考书样本：${isRecord(result.source) ? String(result.source.title ?? "") : ""}`.trim();
+  if (name === "read_style_profile") return `已读取文风：${isRecord(result.profile) ? String(result.profile.name ?? "") : ""}`.trim();
+  if (name === "select_style_profile") return `已切换创作文风：${String(result.active_profile_name ?? "")}`;
+  if (name === "save_reference_style_profile") return `已保存参考文风：${String(result.name ?? "")}`;
   if (name === "save_author_style_guide") return "已保存作者文风指南";
   if (name === "evolve_author_style") return `已进化并保存作者文风指南 · ${String(result.source ?? "")}`;
   if (typeof result.title === "string") return `已完成：${result.title}`;
@@ -255,6 +269,10 @@ function requiresAgentCollaboration(content: string): boolean {
     /(世界观|世界书|设定|背景|势力)/,
   ].filter((pattern) => pattern.test(content)).length;
   return hasAction && (dimensions >= 2 || (dimensions >= 1 && content.length >= 80));
+}
+
+function isWritingRequest(content: string): boolean {
+  return /(正文|章节|续写|扩写|改写|重写|润色|仿写|写作|写(?:一|这|第|下|后|个).{0,8}章)/.test(content);
 }
 
 function requiredSkillForRequest(
@@ -331,6 +349,12 @@ function toolsForAgent(agent: AgentDefinition): AgentToolDefinition[] {
   allowed.add("read_author_style_guide");
   allowed.add("save_author_style_guide");
   allowed.add("evolve_author_style");
+  allowed.add("list_style_sources");
+  allowed.add("read_style_source_sample");
+  allowed.add("list_style_profiles");
+  allowed.add("read_style_profile");
+  allowed.add("select_style_profile");
+  allowed.add("save_reference_style_profile");
   if (agent.kind !== "primary") allowed.delete("delegate_agent");
   return agentTools.filter((tool) => allowed.has(tool.name));
 }
@@ -357,8 +381,10 @@ function systemPrompt(input: {
   if (input.agent.systemPrompt.trim()) {
     sections.push(`当前智能体定义：\n${input.agent.systemPrompt.trim()}`);
   }
-  if (input.catalog.authorStyleGuide && shouldInjectAuthorStyleGuide(input.agent, input.userRequest)) {
-    sections.push(`当前作品的《作者专属文风约束指南》：\n${input.catalog.authorStyleGuide}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。`);
+  if (input.catalog.activeStyleProfile && shouldInjectAuthorStyleGuide(input.agent, input.userRequest)) {
+    const profile = input.catalog.activeStyleProfile;
+    const profileType = profile.kind === "author" ? "作者文风" : "参考小说文风";
+    sections.push(`当前创作使用的${profileType}是“${profile.name} V${profile.version}”：\n${profile.guide}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。不得复制参考小说原句或专有表达。`);
   }
   const enabledRules = input.catalog.rules.filter((rule) => rule.enabled && rule.content.trim());
   if (enabledRules.length) {
@@ -381,6 +407,79 @@ function activePrimaryAgent(agents: AgentDefinition[], activeAgentId: string | n
     ?? agents.find((agent) => agent.enabled && agent.kind === "primary");
   if (!selected) throw new Error("没有可用的主智能体，请在设置中启用一个主智能体");
   return selected;
+}
+
+function latestStyleProfiles(profiles: StyleProfile[]): StyleProfile[] {
+  const series = new Set<string>();
+  return profiles.filter((profile) => {
+    if (series.has(profile.seriesId)) return false;
+    series.add(profile.seriesId);
+    return true;
+  });
+}
+
+async function ensureWritingStyleSelection(input: {
+  projectId: string;
+  request: string;
+  catalog: RuntimeCatalog;
+  askUser?: AskUser;
+  recorder: TraceRecorder;
+  agentName: string;
+}): Promise<void> {
+  if (!isWritingRequest(input.request)
+    || input.catalog.styleSelectionConfigured
+    || !input.catalog.availableStyleProfiles.length
+    || !input.askUser) return;
+  const profiles = latestStyleProfiles(input.catalog.availableStyleProfiles).slice(0, 4);
+  const profileByLabel = new Map(profiles.map((profile) => [
+    `${profile.name} V${profile.version}`,
+    profile,
+  ]));
+  const eventId = input.recorder.add({
+    kind: "question",
+    status: "waiting",
+    title: "选择本次创作文风",
+    agentName: input.agentName,
+    detail: "正文生成前确认要注入的文风版本",
+  });
+  const response = await input.askUser({
+    id: eventId,
+    agentName: input.agentName,
+    questions: [{
+      title: "这次正文使用哪种文风？",
+      description: "选择后会绑定到本次 AI 原稿，作者修改后可据此进化个人文风。",
+      options: [
+        ...profiles.map((profile, index) => ({
+          label: `${profile.name} V${profile.version}${index === 0 ? "（推荐）" : ""}`,
+          description: profile.kind === "author" ? "使用当前作品积累的作者文风" : "使用导入参考小说蒸馏出的约束",
+        })),
+        { label: "不使用文风", description: "只遵循本轮要求和作品设定" },
+      ],
+    }],
+  });
+  if (response.cancelled) {
+    input.recorder.update(eventId, { status: "completed", detail: "本次跳过文风选择" });
+    return;
+  }
+  const answer = response.answers[0]?.answer.trim() ?? "";
+  let selected: StyleProfile | null = null;
+  if (!/不使用|不用|none/i.test(answer)) {
+    const normalizedAnswer = answer.replace(/（推荐）$/, "");
+    selected = profileByLabel.get(normalizedAnswer)
+      ?? profiles.find((profile) => profile.id === answer || profile.name === answer)
+      ?? null;
+    if (!selected) {
+      input.recorder.update(eventId, { status: "error", detail: "未找到选择的文风版本" });
+      throw new Error("未找到选择的文风版本，请从文风书库重新选择");
+    }
+  }
+  await setActiveStyleProfile(input.projectId, selected?.id ?? null);
+  input.catalog.styleSelectionConfigured = true;
+  input.catalog.activeStyleProfile = selected;
+  input.recorder.update(eventId, {
+    status: "completed",
+    detail: selected ? `已选择 ${selected.name} V${selected.version}` : "本次不使用文风",
+  });
 }
 
 async function authorizeToolCall(
@@ -699,14 +798,29 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
             authorRevision: requiredArgument(call.arguments, "author_revision"),
             selection: input.selection,
           });
-          input.catalog.authorStyleGuide = evolved.guide;
-          result = { success: true, source: evolved.source, guide_characters: evolved.guide.length };
+          input.catalog.styleSelectionConfigured = true;
+          input.catalog.activeStyleProfile = evolved.profile;
+          input.catalog.availableStyleProfiles = [
+            evolved.profile,
+            ...input.catalog.availableStyleProfiles.filter((profile) => profile.id !== evolved.profile.id),
+          ];
+          result = {
+            success: true,
+            source: evolved.source,
+            profile_id: evolved.profile.id,
+            version: evolved.profile.version,
+            guide_characters: evolved.guide.length,
+          };
           eventDetail = toolResultDetail(call.name, result);
         } else {
           result = await executeAgentTool(input.project.id, call.name, call.arguments);
           eventDetail = toolResultDetail(call.name, result);
-          if (call.name === "save_author_style_guide") {
-            input.catalog.authorStyleGuide = requiredArgument(call.arguments, "guide");
+          if (call.name === "save_author_style_guide" || call.name === "select_style_profile") {
+            input.catalog.styleSelectionConfigured = true;
+            input.catalog.activeStyleProfile = await getActiveStyleProfile(input.project.id);
+          }
+          if (call.name === "save_reference_style_profile") {
+            input.catalog.availableStyleProfiles = await listStyleProfiles(input.project.id);
           }
           if (call.name === "write_chapter" || call.name === "edit_chapter") {
             consistencyRequired = true;
@@ -773,7 +887,7 @@ export async function runAgent(input: {
   onTrace?: TraceListener;
 }): Promise<AgentRunResult> {
   const consistencyKey = `agent.pendingConsistency.${input.project.id}`;
-  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, authorStyleGuide] = await Promise.all([
+  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, styleSelection, availableStyleProfiles] = await Promise.all([
     getAgentRules(),
     getAgentSkills(),
     getAgentDefinitions(),
@@ -782,7 +896,8 @@ export async function runAgent(input: {
     getSetting("context.historyLimit"),
     getSetting("context.compressSystemPrompts"),
     getSetting(consistencyKey),
-    getAuthorStyleGuide(input.project.id),
+    getActiveStyleSelection(input.project.id),
+    listStyleProfiles(input.project.id),
   ]);
   const parsedHistoryLimit = Number(historyLimitValue);
   const catalog: RuntimeCatalog = {
@@ -794,7 +909,9 @@ export async function runAgent(input: {
       ? parsedHistoryLimit
       : 30,
     compressSystemPrompts: compressValue === "true",
-    authorStyleGuide,
+    styleSelectionConfigured: styleSelection.configured,
+    activeStyleProfile: styleSelection.profile,
+    availableStyleProfiles,
   };
   const agent = activePrimaryAgent(agents, input.agentId ?? activeAgentId);
   const userRequest = latestUserRequest(input.history);
@@ -811,6 +928,14 @@ export async function runAgent(input: {
   const recorder = createTraceRecorder(agent, collaborationRequired, input.onTrace);
 
   try {
+    await ensureWritingStyleSelection({
+      projectId: input.project.id,
+      request: userRequest,
+      catalog,
+      askUser: input.askUser,
+      recorder,
+      agentName: agent.name,
+    });
     const result = await runAgentLoop({
       project: input.project,
       selection: input.selection,

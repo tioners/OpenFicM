@@ -106,8 +106,8 @@ android {
        applicationId 'com.openfic.mobile'
         minSdkVersion 28
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "0.7.0"
+        versionCode 8
+        versionName "0.7.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -130,6 +130,14 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
+        }
+        standalone {
+            initWith release
+            signingConfig signingConfigs.debug
+            debuggable false
+            minifyEnabled false
+            shrinkResources false
+            matchingFallbacks = ["release"]
         }
     }
     packagingOptions {

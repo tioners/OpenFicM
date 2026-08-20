@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useNavigation } from "@react-navigation/native";
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -15,6 +17,7 @@ import {
   setSetting,
 } from "@/data/repositories";
 import { fetchProviderModels, type RemoteModel } from "@/llm/model-catalog";
+import type { RootStackParamList } from "@/navigation/types";
 import { SettingsCategoryScreen, type SettingsCategory } from "@/screens/settings-category-screen";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
@@ -45,6 +48,7 @@ const settingsCategories: Array<{
 ];
 
 export function SettingsScreen() {
+  const rootNavigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const revision = useAppStore((state) => state.dataRevision);
   const refreshData = useAppStore((state) => state.refreshData);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -202,7 +206,14 @@ export function SettingsScreen() {
         <Header title="设置" />
         <View style={styles.categoryList}>
           {settingsCategories.map((category) => (
-            <Pressable key={category.id} onPress={() => setActiveCategory(category.id)} style={({ pressed }) => [styles.categoryRow, pressed && styles.categoryRowPressed]}>
+            <Pressable
+              key={category.id}
+              onPress={() => {
+                if (category.id === "style") rootNavigation.navigate("StyleLibrary");
+                else setActiveCategory(category.id);
+              }}
+              style={({ pressed }) => [styles.categoryRow, pressed && styles.categoryRowPressed]}
+            >
               <View style={styles.categoryIcon}><Ionicons name={category.icon} size={21} color={colors.primary} /></View>
               <Text style={styles.categoryLabel}>{category.label}</Text>
               <Ionicons name="chevron-forward" size={19} color={colors.textMuted} />
