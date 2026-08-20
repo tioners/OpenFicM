@@ -8,33 +8,34 @@
 
 OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把桌面端网页套进 WebView。目标是让用户在 Android 手机上本地管理小说、章节、角色、世界书和 Agent 对话；应用不需要电脑配合运行，也不需要 FastAPI、Socket.IO 或 Metro。
 
-应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并可选检查 oh-story-claudecode 内容更新。API Base URL、Key、模型和供应商均由用户配置。
+应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.6.0
+当前正式版本：0.7.0
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.6.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：992b082 docs: add OpenFicM project handoff context
-- 最近功能提交：5fbf10d feat(mobile): add export and recoverable editing
-- Release 标签：v0.6.0
+- 最新源码提交：本次 0.7.0 发布提交，以 v0.7.0 标签为准
+- 本轮审查基线：1a848fb feat(mobile): add runtime resources and authoring workflows
+- Release 标签：v0.7.0
 - Android applicationId：com.openfic.mobile
-- versionCode：6
-- versionName：0.6.0
+- versionCode：7
+- versionName：0.7.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.6.0.apk；APK 和密钥均被 Git 忽略
-- APK SHA-256：E74E53F2D13D8974E21520C580D9BBBAE482D055143ED1DFA0032E107E29D3A8
+- Release APK：仓库根目录 OpenFicM-Android-0.7.0.apk；APK 和密钥均被 Git 忽略
+- APK 大小：131,904,972 字节（125.79 MiB）
+- APK SHA-256：FB44317FCAABBD890110E60B332081C8102AE313C75F0931C507A7B7319C265C
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.6.0 的正式证书与 0.5.0 相同，因此可以直接覆盖升级。此前为了验证构建曾生成过 debug 签名的本地测试 APK，但它不是交付包，也不应上传为正式 Release。
+0.7.0 继续使用 0.6.0 的正式证书，因此可以直接覆盖升级。发布审查发现旧 Gradle 增量资源曾把两个已取消内置的 GGUF 重新带入 APK；正式脚本现会先删除受路径保护的 android/app/build 目录，并在复制产物前拒绝任何 .gguf 条目。最终 APK 已确认不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
 
 ## 3. 功能清单
 
@@ -79,7 +80,7 @@ GitHub 仓库：
 - APK 不包含中文嵌入 GGUF 和重排 GGUF。首次启动从 Hugging Face 拉取到应用私有目录，临时文件完成大小和 SHA-256 校验后才安装。
 - 运行资源完整后自动预热两个模型；高级设置不再提供手动预热/释放按钮，只显示状态和一键修复入口。
 - llama.rn 在手机 CPU 上加载模型；本机没有 Hexagon SDK，所以当前构建日志显示 CPU-only，这是预期降级，不是构建失败。
-- APK 中只应包含 JavaScript bundle，不应出现 `.gguf`、`builtin-catalog.json` 或 Lorn Skill 静态资源。
+- APK 仍包含 React Native、llama.rn 和应用所需的 arm64 原生库；运行资源层面不应出现 `.gguf`、OpenFicM/Lorn catalog 或 Agent/Skill 静态目录。
 
 ## 4. 代码结构
 
@@ -102,7 +103,7 @@ GitHub 仓库：
 - src/components：移动端通用 UI、错误提示、Agent trace 和输入控件。
 - assets/models：运行时模型来源、许可证和哈希说明；大 GGUF 不应被 Git 追踪。
 - android/app/build.gradle：Android 版本、签名环境变量和 Release 配置。
-- scripts/build-release.ps1：正式 Release 构建、版本命名、可选 lineage 签名和 SHA-256 输出。
+- scripts/build-release.ps1：清理旧 app 构建输出、拒绝内置 GGUF、执行正式签名、版本命名、可选 lineage 签名和 SHA-256 输出。
 
 ### 保留的上游目录
 
@@ -116,8 +117,8 @@ backend、frontend、desktop 是保留的 OpenFic 上游源码和兼容修复，
 4. 可恢复 Agent：失败消息作为 assistant 侧的任务未完成记录保存，RetryRequest 在界面内保存原消息和历史快照；重试不产生重复 user 行。
 5. 预览优先：手机触屏容易误触，章节进入时先读预览，点击编辑后才显示输入控件。
 6. 系统分享导出：导出文件写入 Expo cache，不申请外部存储权限，由 Android 分享/文件管理器决定最终保存位置。
-7. Gemini schema：function declaration 的每个参数必须有 type；React Native 侧递归补齐缺失类型并清理不支持的 additionalProperties，修复 chapter_ref 导致的 400。
-8. 供应链限制：oh-story 远程更新只按白名单读取 Markdown，绑定 Release commit/tree/blob SHA，远程 Hook、脚本和 Git 配置不会执行。
+7. Gemini schema：function declaration 的每个参数必须有 type；React Native 侧递归补齐缺失类型并清理不支持的 additionalProperties，修复 chapter_ref 导致的 400；工具回合还必须原样带回 Gemini thoughtSignature。
+8. 供应链限制：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变提交 1a848fbe77f9952c38aac8c18240026154446114 并校验 SHA-256；oh-story 只按白名单读取 Markdown 并绑定 Release commit/tree/blob SHA，远程 Hook、脚本和 Git 配置不会执行。
 
 ## 6. 构建与验证
 
@@ -155,19 +156,23 @@ $env:OPENFICM_RELEASE_KEY_PASSWORD = $password
 powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 ~~~
 
-脚本会在仓库根目录生成 OpenFicM-Android-0.6.0.apk，并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
+脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.0.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
 
 ### 已完成的校验
 
 - npm run type-check：通过。
+- npx expo-doctor：20/20 通过。
 - Gradle assembleRelease：BUILD SUCCESSFUL。
 - Release 脚本正式签名：成功。
 - apksigner：v2 签名验证通过，正式证书为 c5dd…f863。
-- aapt2：package com.openfic.mobile，versionCode 6，versionName 0.6.0。
-- 本轮类型检查和配置扫描应确认 APK 不再引用 GGUF asset、内置 catalog 或 `noCompress 'gguf'`。
+- aapt2：package com.openfic.mobile，versionCode 7，versionName 0.7.0，minSdk 28，targetSdk 36。
+- APK ZIP：仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录；最终大小 125.79 MiB。
+- APK SHA-256：FB44317FCAABBD890110E60B332081C8102AE313C75F0931C507A7B7319C265C。
+- 固定提交上的 OpenFicM catalog 与 Lorn mobile catalog 已重新下载，SHA-256 均与代码常量一致。
 - verify-change：通过，设计文档已同步。
 - verify-quality：通过；仅报告已有 runtime.ts 和 repositories.ts 文件超过 500 行以及若干既有长行。
 - verify-security：严重、高危、中危、低危均为 0。
+- npm audit：报告 Metro 构建链的 image-size 高危 DoS 和 Xcode 构建链的 uuid 中危问题；它们不进入 APK，且 image-size 截至 2026-08-20 无上游修复版本。不要运行会把 Expo 57 降到 53 的 npm audit fix --force，等待 Expo/Metro 上游升级。
 
 ## 7. 发布流程
 
@@ -182,10 +187,10 @@ git push origin main
 正式 Release 使用 GitHub CLI：
 
 ~~~powershell
-gh release create v0.6.0 .\OpenFicM-Android-0.6.0.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.6.0" --notes-file notes.md --latest
+gh release create v0.7.0 .\OpenFicM-Android-0.7.0.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.0" --notes-file notes.md --latest
 ~~~
 
-不要把 notes.md、APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.6.0 和 gh release list 验证标签及资产。
+不要把 notes.md、APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.0 和 gh release list 验证标签及资产。
 
 ## 8. 已知限制和后续重点
 

@@ -128,10 +128,17 @@ export async function getIndexSettings(): Promise<IndexSettings> {
 
 export async function saveIndexSettings(settings: IndexSettings): Promise<void> {
   if (settings.chunkOverlap >= settings.chunkSize) throw new Error("分块重叠必须小于分块大小");
+  const chunkSize = boundedInteger(settings.chunkSize, DEFAULT_INDEX_SETTINGS.chunkSize, 120, 440);
+  const chunkOverlap = boundedInteger(
+    settings.chunkOverlap,
+    Math.min(DEFAULT_INDEX_SETTINGS.chunkOverlap, chunkSize - 1),
+    0,
+    chunkSize - 1,
+  );
   await writeJson("index.settings", {
     enabled: Boolean(settings.enabled),
-    chunkSize: boundedInteger(settings.chunkSize, DEFAULT_INDEX_SETTINGS.chunkSize, 120, 440),
-    chunkOverlap: boundedInteger(settings.chunkOverlap, DEFAULT_INDEX_SETTINGS.chunkOverlap, 0, 439),
+    chunkSize,
+    chunkOverlap,
     retrievalTopK: boundedInteger(settings.retrievalTopK, DEFAULT_INDEX_SETTINGS.retrievalTopK, 1, 20),
     rerankTopK: boundedInteger(settings.rerankTopK, DEFAULT_INDEX_SETTINGS.rerankTopK, 1, 12),
     rerankEnabled: Boolean(settings.rerankEnabled),

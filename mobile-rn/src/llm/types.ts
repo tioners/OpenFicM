@@ -2,6 +2,9 @@ export interface AgentToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  providerMetadata?: {
+    geminiThoughtSignature?: string;
+  };
 }
 
 export interface AgentMessage {

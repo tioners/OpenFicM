@@ -1,6 +1,6 @@
 # OpenFicM
 
-OpenFicM is an independent Android adaptation of OpenFic. It uses React Native, Expo SQLite, and an on-device Agent runtime. The installed APK does not require a PC, FastAPI, Socket.IO, or Metro. Network access is used only for user-configured model APIs, provider model discovery, and optional oh-story content updates.
+OpenFicM is an independent Android adaptation of OpenFic. It uses React Native, Expo SQLite, and an on-device Agent runtime. The installed APK does not require a PC, FastAPI, Socket.IO, or Metro. Network access is used for the first-run runtime resource download, user-configured model APIs, provider model discovery, and manually requested content updates.
 
 This is an independently maintained derivative project, not an official OpenFic Android client.
 
@@ -8,7 +8,7 @@ This is an independently maintained derivative project, not an official OpenFic 
 
 Download the APK from [GitHub Releases](https://github.com/tioners/OpenFicM/releases).
 
-- Current version: 0.6.0
+- Current version: 0.7.0
 - Android 9.0 or newer
 - arm64-v8a only
 - Official APK certificate SHA-256: c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
@@ -23,9 +23,12 @@ Download the APK from [GitHub Releases](https://github.com/tioners/OpenFicM/rele
 - Custom OpenAI-compatible, Google Gemini, and Anthropic providers
 - Provider model discovery
 - Rules, skills, agents, tool permissions, context, indexing, and advanced settings
-- Built-in PC Agent/Skill content plus verified oh-story updates and rollback
+- Verified first-run downloads for OpenFicM Agent/Skill content, oh-story content, Lorn style skills, and local retrieval models
 - Character and world-book consistency checks after chapter changes
 - Gemini functionDeclaration schema compatibility fix
+- Lorn style distillation and evolution with a per-project author style guide
+- JSON and Markdown exports for individual or all character and world-book entries
+- Persistent assistant retry, copy, regenerate, editable history, and expandable error details
 
 API keys are stored with Android SecureStore rather than SQLite. Project content remains on the device unless it is sent to a model provider selected by the user.
 HTTP Base URLs are allowed for local custom providers; use HTTPS whenever the provider is reachable across a network.
@@ -37,12 +40,13 @@ Node.js 22, Java 17, Android SDK, and PowerShell are required.
 ~~~powershell
 cd mobile-rn
 npm ci
-npm run models:download
 npm run type-check
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ~~~
 
-The model downloader verifies both GGUF files by SHA-256. GGUF files, APKs, signing keys, and local.properties are excluded from Git.
+The APK does not bundle GGUF models or Agent/Skill catalogs. On first launch, the user explicitly downloads them to the app-private directory; temporary model files are checked for exact size and SHA-256 before installation. GGUF files, APKs, signing keys, and local.properties are excluded from Git.
+
+The release script clears `android/app/build` before assembling and rejects any APK containing a GGUF entry, preventing stale incremental assets from being published.
 
 Release builds require all four `OPENFICM_RELEASE_STORE_FILE`, `OPENFICM_RELEASE_STORE_PASSWORD`, `OPENFICM_RELEASE_KEY_ALIAS`, and `OPENFICM_RELEASE_KEY_PASSWORD` variables. Use `npm run android:apk:debug` for local development. The official OpenFicM signing key is not published.
 

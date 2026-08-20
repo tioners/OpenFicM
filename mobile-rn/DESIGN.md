@@ -14,7 +14,7 @@
 
 应用本身没有本地 HTTP 服务，也没有 Socket.IO 连接。网络请求只由模型客户端发往用户配置的 Base URL。Base URL 和 API Key 都在调用前经过校验；模型响应按 HTTP 状态和 JSON 格式处理，并设置 120 秒超时。
 
-运行资源下载是显式网络入口：OpenFicM 基础 catalog 从固定 SHA 的 GitHub Raw 文件获取，oh-story 通过正式 Release 获取，Lorn 原版蒸馏 Skill 绑定固定 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`，两个 GGUF 模型从固定 Hugging Face 仓库获取。所有下载都限制大小；模型写入 `.download` 临时文件，完成大小和 SHA-256 校验后才移动到正式路径。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
+运行资源下载是显式网络入口：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变 commit `1a848fbe77f9952c38aac8c18240026154446114` 并校验固定 SHA-256，oh-story 通过正式 Release 获取，Lorn 原版蒸馏 Skill 绑定固定 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`，两个 GGUF 模型从固定 Hugging Face 仓库获取。所有下载都限制大小；模型写入 `.download` 临时文件，完成大小和 SHA-256 校验后才移动到正式路径。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
 
 ## 本地检索
 
@@ -60,7 +60,7 @@
 
 ## Gemini Schema
 
-Gemini function declaration 使用大写 Schema 类型，并移除不受支持的 `additionalProperties`。React Native 客户端递归补齐缺失类型；桌面端在绑定 Google 工具前展开本地 `$defs` 引用，并将可空 `anyOf` 折叠为带 `nullable` 的单一类型，避免 `chapter_ref` 缺少 `type` 导致 400。
+Gemini function declaration 使用大写 Schema 类型，并移除不受支持的 `additionalProperties`。React Native 客户端递归补齐缺失类型，并在后续工具回合原样带回 Gemini 返回的 thought signature；桌面端在绑定 Google 工具前展开本地 `$defs` 引用，并将可空 `anyOf` 折叠为带 `nullable` 的单一类型，避免 `chapter_ref` 缺少 `type` 导致 400。
 
 ## 数据安全
 
@@ -106,3 +106,7 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 ### 2026-08-20 - 文风插件、消息操作与资料导出
 
 新增隔离的 Lorn 文风蒸馏/进化插件、作品级文风指南和正文动态注入；助手补齐复制、重新生成、持久化失败重试与错误详情；角色库和世界书增加 JSON/Markdown 单条与批量导出。
+
+### 2026-08-20 - OpenFicM 0.7.0 发布审查
+
+运行资源地址改为绑定不可变提交；历史用户消息的删除与替换合并为单一 SQLite 独占事务；自动保存会在并发保存结束后重新调度未保存草稿；Gemini 工具回合保留 thought signature，并在失败记录中保留原始网络错误详情。正式构建会先清理 android/app/build，并在复制产物前拒绝任何 GGUF 条目，避免旧增量资源重新进入 APK。

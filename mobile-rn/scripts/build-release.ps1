@@ -19,6 +19,20 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $androidRoot = Join-Path $projectRoot "android"
 $gradle = Join-Path $androidRoot "gradlew.bat"
 $mirrorInit = Join-Path $androidRoot "gradle\mirrors.init.gradle"
+$appConfig = Get-Content -Raw (Join-Path $projectRoot "app.json") | ConvertFrom-Json
+$version = [string]$appConfig.expo.version
+$outputApk = Join-Path (Split-Path $projectRoot -Parent) "OpenFicM-Android-$version.apk"
+if (Test-Path -LiteralPath $outputApk) {
+    Remove-Item -LiteralPath $outputApk -Force
+}
+$appBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $androidRoot "app\build"))
+$androidAppRoot = [System.IO.Path]::GetFullPath((Join-Path $androidRoot "app")) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $appBuildRoot.StartsWith($androidAppRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clean unexpected Android build directory: $appBuildRoot"
+}
+if (Test-Path -LiteralPath $appBuildRoot) {
+    Remove-Item -LiteralPath $appBuildRoot -Recurse -Force
+}
 
 Push-Location $androidRoot
 try {
@@ -35,9 +49,22 @@ if (-not (Test-Path -LiteralPath $inputApk)) {
     throw "Release APK was not generated: $inputApk"
 }
 
-$appConfig = Get-Content -Raw (Join-Path $projectRoot "app.json") | ConvertFrom-Json
-$version = [string]$appConfig.expo.version
-$outputApk = Join-Path (Split-Path $projectRoot -Parent) "OpenFicM-Android-$version.apk"
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::OpenRead($inputApk)
+try {
+    $bundledModels = @(
+        $archive.Entries |
+            Where-Object { $_.FullName -match "(?i)\.gguf$" } |
+            ForEach-Object FullName
+    )
+} finally {
+    $archive.Dispose()
+}
+if ($bundledModels.Count -gt 0) {
+    $paths = $bundledModels -join ", "
+    throw "Release APK must not bundle local GGUF models: $paths"
+}
+Write-Output "APK runtime resource check: no bundled GGUF models"
 $lineageFile = $env:OPENFICM_RELEASE_LINEAGE_FILE
 
 if ($lineageFile) {

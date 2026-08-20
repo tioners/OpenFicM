@@ -15,6 +15,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 - bge-small-zh-v1.5-q4_k_m.gguf
 - bge-reranker-base-q4_k_m.gguf
 
+正式构建脚本会先清理 android/app/build 生成目录，并在输出前检查 APK；只要发现任何 GGUF 条目就会直接失败，避免旧增量资源被误发布。
+
 ## 正式签名
 
 官方构建通过以下环境变量读取仓库外的私钥：

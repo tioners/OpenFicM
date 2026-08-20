@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-08-20
 
 - Moved Agent/Skill and local retrieval models out of the APK. Added startup resource integrity checks, one-click GitHub/Hugging Face download, temporary-file SHA-256 verification and automatic model warm-up.
 - Added the original Lorn.NovelWriteSkills distillation Skill and allowlisted references, pinned to commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`; the upstream repository root does not declare a license.
 - Added the isolated Lorn style distillation and evolution plugin with per-project style guides and optional FastAPI integration.
 - Added persistent assistant retry actions, message copying, and human-readable network errors with expandable details.
 - Added JSON and Markdown exports for individual or all character and world-info entries.
+- Pinned first-run catalogs to an immutable OpenFicM commit while retaining SHA-256 verification.
+- Made edited user-message branch replacement atomic and closed an autosave race that could leave the newest draft unsaved.
+- Preserved Gemini thought signatures across tool turns and retained native network failure details for retry diagnostics.
+- Hardened release builds against stale Android outputs and fails the build if any local GGUF model is bundled.
 
 ## 0.6.0 - 2026-08-19
 

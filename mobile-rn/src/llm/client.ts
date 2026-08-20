@@ -46,7 +46,10 @@ async function requestJson(url: string, init: RequestInit): Promise<Record<strin
     return data;
   } catch (error) {
     if (isRecord(error) && error.name === "AbortError") throw new Error("模型请求超时，请检查网络或 Base URL");
-    if (error instanceof TypeError) throw new Error("无法连接模型服务，请检查网络、Base URL 和证书设置");
+    if (error instanceof TypeError) {
+      const detail = error.message.trim();
+      throw new Error(`fetch failed${detail ? `: ${detail}` : ""}`);
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -132,7 +135,14 @@ function geminiContents(messages: AgentMessage[]): Record<string, unknown>[] {
     }
     const parts: Record<string, unknown>[] = [];
     if (message.content) parts.push({ text: message.content });
-    for (const call of message.toolCalls ?? []) parts.push({ functionCall: { name: call.name, args: call.arguments } });
+    for (const call of message.toolCalls ?? []) {
+      parts.push({
+        functionCall: { name: call.name, args: call.arguments },
+        ...(call.providerMetadata?.geminiThoughtSignature
+          ? { thoughtSignature: call.providerMetadata.geminiThoughtSignature }
+          : {}),
+      });
+    }
     if (parts.length) contents.push({ role: message.role === "assistant" ? "model" : "user", parts });
   }
   return contents;
@@ -174,6 +184,9 @@ async function callGemini(
     id: `gemini-${Date.now()}-${index}`,
     name: String(part.functionCall.name),
     arguments: isRecord(part.functionCall.args) ? part.functionCall.args : {},
+    ...(typeof part.thoughtSignature === "string" ? {
+      providerMetadata: { geminiThoughtSignature: part.thoughtSignature },
+    } : {}),
   }));
   return {
     content: parts.filter((part) => typeof part.text === "string").map((part) => part.text).join(""),

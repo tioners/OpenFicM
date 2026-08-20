@@ -155,6 +155,10 @@ function validateChapterContent(content: string): void {
   }
 }
 
+function generatedMessageTitle(content: string): string {
+  return content.replace(/\s+/g, " ").trim().slice(0, 24) || "新对话";
+}
+
 export async function listProjects(): Promise<Project[]> {
   const db = await getDatabase();
   return (await db.getAllAsync<ProjectRow>("SELECT * FROM projects ORDER BY updated_at DESC")).map(mapProject);
@@ -604,6 +608,63 @@ export async function deleteMessagesFrom(sessionId: string, messageId: string): 
   });
 }
 
+export async function replaceUserMessageBranch(
+  sessionId: string,
+  messageId: string,
+  content: string,
+): Promise<{ message: ChatMessage; session: ChatSession }> {
+  if (!content.trim()) throw new Error("消息内容不能为空");
+  const db = await getDatabase();
+  let replacement: { message: ChatMessage; session: ChatSession } | null = null;
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const session = await txn.getFirstAsync<SessionRow>("SELECT * FROM chat_sessions WHERE id = ?", sessionId);
+    if (!session) throw new Error("对话不存在");
+    const target = await txn.getFirstAsync<{ rowid: number; role: ChatMessage["role"] }>(
+      "SELECT rowid, role FROM chat_messages WHERE session_id = ? AND id = ?",
+      sessionId,
+      messageId,
+    );
+    if (!target || target.role !== "user") throw new Error("要编辑的用户消息不存在");
+    const earlierUser = await txn.getFirstAsync<{ found: number }>(
+      "SELECT 1 AS found FROM chat_messages WHERE session_id = ? AND role = 'user' AND rowid < ? LIMIT 1",
+      sessionId,
+      target.rowid,
+    );
+    const createdAt = new Date().toISOString();
+    const message: ChatMessage = {
+      id: createId(),
+      projectId: session.project_id,
+      sessionId,
+      role: "user",
+      content,
+      metadata: null,
+      createdAt,
+    };
+    const title = earlierUser ? session.title : generatedMessageTitle(content);
+    await txn.runAsync("DELETE FROM chat_messages WHERE session_id = ? AND rowid >= ?", sessionId, target.rowid);
+    await txn.runAsync(
+      "INSERT INTO chat_messages(id, project_id, session_id, role, content, metadata_json, created_at) VALUES (?, ?, ?, 'user', ?, NULL, ?)",
+      message.id,
+      message.projectId,
+      message.sessionId,
+      message.content,
+      message.createdAt,
+    );
+    await txn.runAsync(
+      "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?",
+      title,
+      createdAt,
+      sessionId,
+    );
+    replacement = {
+      message,
+      session: mapSession({ ...session, title, updated_at: createdAt }),
+    };
+  });
+  if (!replacement) throw new Error("消息编辑事务未完成");
+  return replacement;
+}
+
 export async function addMessage(
   sessionId: string,
   role: ChatMessage["role"],
@@ -616,7 +677,7 @@ export async function addMessage(
   if (!session) throw new Error("对话不存在");
   const createdAt = new Date().toISOString();
   const message: ChatMessage = { id: createId(), projectId: session.project_id, sessionId, role, content, metadata, createdAt };
-  const generatedTitle = content.replace(/\s+/g, " ").trim().slice(0, 24);
+  const generatedTitle = generatedMessageTitle(content);
   const metadataJson = metadata ? JSON.stringify(metadata) : null;
   await db.withExclusiveTransactionAsync(async (txn) => {
     await txn.runAsync(
@@ -625,7 +686,7 @@ export async function addMessage(
     );
     await txn.runAsync(
       "UPDATE chat_sessions SET title = CASE WHEN title = '新对话' AND ? = 'user' THEN ? ELSE title END, updated_at = ? WHERE id = ?",
-      role, generatedTitle || "新对话", createdAt, sessionId,
+      role, generatedTitle, createdAt, sessionId,
     );
   });
   return message;

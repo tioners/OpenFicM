@@ -14,10 +14,11 @@ import {
 const OPENFICM_CATALOG_KEY = "content.openficm.catalog.v1";
 const LORN_PACKAGE_KEY = "content.lornStyle.package.v1";
 const MODEL_VERIFICATION_PREFIX = "resources.localModel.verified.";
-const OPENFICM_CATALOG_URL = "https://raw.githubusercontent.com/tioners/OpenFicM/main/resources/openficm-agent-catalog.json";
+const OPENFICM_CONTENT_COMMIT = "1a848fbe77f9952c38aac8c18240026154446114";
+const OPENFICM_CATALOG_URL = `https://raw.githubusercontent.com/tioners/OpenFicM/${OPENFICM_CONTENT_COMMIT}/resources/openficm-agent-catalog.json`;
 const OPENFICM_CATALOG_SHA256 = "3a186be06211eb659c81f5b1dc77ed65566fd4f295577acc540eb51ef3af17ef";
 const OPENFICM_CATALOG_MAX_BYTES = 750_000;
-const LORN_MOBILE_CATALOG_URL = "https://raw.githubusercontent.com/tioners/OpenFicM/main/plugins/lorn-style-evolution/mobile-catalog.json";
+const LORN_MOBILE_CATALOG_URL = `https://raw.githubusercontent.com/tioners/OpenFicM/${OPENFICM_CONTENT_COMMIT}/plugins/lorn-style-evolution/mobile-catalog.json`;
 const LORN_MOBILE_CATALOG_SHA256 = "c4941dae92e2af7c58a016e9bf5204dacecf17a442f361e1b07875f43967433d";
 const LORN_REPOSITORY = "lornshrimp/Lorn.NovelWriteSkills";
 const LORN_COMMIT = "5acd34586d5d241193bd36ceed9341f7f482ea3b";

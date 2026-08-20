@@ -8,7 +8,7 @@ OpenFicM 是基于 OpenFic 重构的 Android 小说创作应用。它使用 Reac
 
 前往 [GitHub Releases](https://github.com/tioners/OpenFicM/releases) 下载 APK。
 
-- 当前版本：0.6.0
+- 当前版本：0.7.0
 - Android 9.0 及以上
 - 仅提供 arm64-v8a，适用于主流 64 位 Android 手机
 - 官方 APK 当前签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
@@ -45,6 +45,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ~~~
 
 APK 不包含 GGUF、基础 Agent/Skill 或 Lorn Skill。首次启动会显示运行资源清单，用户点击“一键拉取并预热”后，应用将把模型保存到应用私有目录，下载临时文件先校验大小和 SHA-256，再安装到正式路径。基础 Agent/Skill 从 `tioners/OpenFicM` 的 `resources/openficm-agent-catalog.json` 获取，模型来自 Hugging Face；所有固定来源和哈希值见 `mobile-rn/src/settings/remote-resources.ts`。GGUF、APK、签名文件和 local.properties 不进入 Git 仓库。
+
+正式构建脚本会先清理 `android/app/build` 生成目录，并在复制产物前拒绝任何 GGUF 条目，防止旧增量资源重新进入 APK。
 
 Release 构建必须提供 `OPENFICM_RELEASE_STORE_FILE`、`OPENFICM_RELEASE_STORE_PASSWORD`、`OPENFICM_RELEASE_KEY_ALIAS` 和 `OPENFICM_RELEASE_KEY_PASSWORD`。本地开发请使用 `npm run android:apk:debug`，避免误用调试证书发布。
 

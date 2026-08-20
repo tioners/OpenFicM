@@ -31,6 +31,7 @@ import {
   listMessages,
   listModels,
   listProviders,
+  replaceUserMessageBranch,
   setSetting,
   updateChatSession,
 } from "@/data/repositories";
@@ -463,28 +464,27 @@ export function AssistantScreen() {
         if (editTarget) {
           const editIndex = messages.findIndex((message) => message.id === editTarget.id);
           if (editIndex < 0) throw new Error("要编辑的消息不存在");
-          await deleteMessagesFrom(sessionId, editTarget.id);
+          const replacement = await replaceUserMessageBranch(sessionId, editTarget.id, content);
+          userMessage = replacement.message;
+          userMessageSaved = true;
           baseHistory = messages.slice(0, editIndex);
-          setMessages(baseHistory);
+          nextHistory = [...baseHistory, userMessage];
+          workingSession = replacement.session;
           setEditingMessageId(null);
-          if (editIndex === 0) {
-            workingSession = await updateChatSession({ id: activeSession.id, title: generatedSessionTitle(content) });
-            setActiveSession(workingSession);
-            setSessions((current) => current.map((session) => session.id === workingSession.id ? workingSession : session));
-          }
+        } else {
+          userMessage = await addMessage(sessionId, "user", content);
+          userMessageSaved = true;
+          nextHistory = [...baseHistory, userMessage];
+          workingSession = {
+            ...workingSession,
+            title: workingSession.title === "新对话" ? generatedSessionTitle(content) : workingSession.title,
+            updatedAt: userMessage.createdAt,
+          };
         }
-        userMessage = await addMessage(sessionId, "user", content);
-        userMessageSaved = true;
-        nextHistory = [...baseHistory, userMessage];
         if (!isCurrentRequest()) return;
         setMessages(nextHistory);
-        const updatedSession = {
-          ...workingSession,
-          title: workingSession.title === "新对话" ? generatedSessionTitle(content) : workingSession.title,
-          updatedAt: userMessage.createdAt,
-        };
-        setActiveSession(updatedSession);
-        setSessions((current) => [updatedSession, ...current.filter((session) => session.id !== updatedSession.id)]);
+        setActiveSession(workingSession);
+        setSessions((current) => [workingSession, ...current.filter((session) => session.id !== workingSession.id)]);
       }
       if (!userMessage) throw new Error("消息准备失败，请重试");
       const response = await runAgent({

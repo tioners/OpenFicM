@@ -93,6 +93,8 @@ export function WritingScreen() {
       const fontSize = Number(fontValue);
       if (Number.isInteger(delay) && delay >= 250 && delay <= 10_000) setAutoSaveDelay(delay);
       if (Number.isFinite(fontSize) && fontSize >= 14 && fontSize <= 28) setEditorFontSize(fontSize);
+    }).catch((settingsError) => {
+      setError(settingsError instanceof Error ? settingsError.message : String(settingsError));
     });
   }, []);
 
@@ -218,12 +220,12 @@ export function WritingScreen() {
   });
 
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || saving) return;
     const timeout = setTimeout(() => {
       void persistDraft(false);
     }, autoSaveDelay);
     return () => clearTimeout(timeout);
-  }, [dirty, title, content, activeChapter?.id, autoSaveDelay]);
+  }, [dirty, title, content, activeChapter?.id, autoSaveDelay, saving]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
