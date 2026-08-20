@@ -17,6 +17,7 @@ import {
   setSetting,
 } from "@/data/repositories";
 import { fetchProviderModels, type RemoteModel } from "@/llm/model-catalog";
+import { DEFAULT_MAX_OUTPUT_TOKENS, MAX_CONFIGURED_OUTPUT_TOKENS } from "@/llm/limits";
 import type { RootStackParamList } from "@/navigation/types";
 import { SettingsCategoryScreen, type SettingsCategory } from "@/screens/settings-category-screen";
 import { useAppStore } from "@/store/app-store";
@@ -62,7 +63,7 @@ export function SettingsScreen() {
   const [modelName, setModelName] = useState("");
   const [modelId, setModelId] = useState("");
   const [temperature, setTemperature] = useState("0.8");
-  const [maxTokens, setMaxTokens] = useState("4096");
+  const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MAX_OUTPUT_TOKENS));
   const [saving, setSaving] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [fetchingProviderId, setFetchingProviderId] = useState<string | null>(null);
@@ -125,8 +126,8 @@ export function SettingsScreen() {
       setError("温度必须在 0 到 2 之间");
       return;
     }
-    if (!Number.isInteger(parsedMaxTokens) || parsedMaxTokens < 1) {
-      setError("最大输出 Token 数必须是正整数");
+    if (!Number.isInteger(parsedMaxTokens) || parsedMaxTokens < 1 || parsedMaxTokens > MAX_CONFIGURED_OUTPUT_TOKENS) {
+      setError(`最大输出 Token 数必须在 1 到 ${MAX_CONFIGURED_OUTPUT_TOKENS} 之间；1M 通常是上下文窗口，不需要填写 1000000`);
       return;
     }
     setSavingModel(true);
@@ -297,6 +298,7 @@ export function SettingsScreen() {
         <Field label="模型 ID" value={modelId} onChangeText={setModelId} autoCapitalize="none" placeholder="gemini-2.5-pro" />
         <Field label="温度" value={temperature} onChangeText={setTemperature} keyboardType="decimal-pad" />
         <Field label="最大输出 Token 数" value={maxTokens} onChangeText={setMaxTokens} keyboardType="number-pad" />
+        <Text style={styles.fieldHint}>单次回复长度，不是上下文窗口；1M 上下文模型保持 {DEFAULT_MAX_OUTPUT_TOKENS} 或按需填写，最高 {MAX_CONFIGURED_OUTPUT_TOKENS}。</Text>
         <Button label="添加模型" onPress={() => void addModel()} disabled={!selectedProviderId || !modelName.trim() || !modelId.trim()} loading={savingModel} />
       </View>
 
@@ -364,6 +366,7 @@ const styles = StyleSheet.create({
   modelText: { flex: 1 },
   modelName: { color: colors.text, fontSize: 15, fontWeight: "600" },
   modelId: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  fieldHint: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: -spacing.sm },
   providerChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   choice: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md },
   choiceActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },

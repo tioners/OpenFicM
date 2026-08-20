@@ -2,7 +2,7 @@
 
 这是 OpenFicM 的 React Native Android 工程。应用不依赖电脑后端，业务数据保存在本机 SQLite，API Key 保存在 Android SecureStore。
 
-面向普通用户的安装、模型配置、Agent、文风、导出和故障排查说明见 [Android 使用说明](../docs/USER_GUIDE.md)，0.7.1 更新内容见 [版本说明](../docs/releases/v0.7.1.md)。
+面向普通用户的安装、模型配置、Agent、文风、导出和故障排查说明见 [Android 使用说明](../docs/USER_GUIDE.md)，0.7.3 更新内容见 [版本说明](../docs/releases/v0.7.3.md)。
 
 ## 开发
 

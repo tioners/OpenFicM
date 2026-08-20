@@ -4,6 +4,7 @@ export interface AgentToolCall {
   arguments: Record<string, unknown>;
   providerMetadata?: {
     geminiThoughtSignature?: string;
+    openAiExtraContent?: Record<string, unknown>;
   };
 }
 

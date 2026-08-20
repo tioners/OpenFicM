@@ -19,9 +19,18 @@ const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 const MAX_EXTRACTED_CHARACTERS = 8_000_000;
 const MAX_EPUB_TEXT_ENTRY_BYTES = 4 * 1024 * 1024;
 const MAX_EPUB_TOTAL_TEXT_BYTES = 20 * 1024 * 1024;
-const SAMPLE_SECTION_COUNT = 6;
-const SAMPLE_CHARACTERS_PER_SECTION = 4_000;
+const ANALYSIS_PASSAGE_COUNT = 24;
+const ANALYSIS_PASSAGE_CHARACTERS = 1_400;
+const ANALYSIS_BATCH_SIZE = 6;
+const MIN_CHAPTER_HEADING_COUNT = 8;
+const CHAPTER_HEADING_PATTERN = /^[ \t]{0,4}(?:第[0-9零〇一二两三四五六七八九十百千万]+[章节回][^\n]{0,60}|(?:chapter|chap\.?)\s*\d+[^\n]{0,60})[ \t]*$/gim;
 const LIBRARY_DIRECTORY_NAME = "style-library";
+
+export interface StyleAnalysisBatch {
+  label: string;
+  passageCount: number;
+  text: string;
+}
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -271,18 +280,54 @@ export async function readStyleSourceText(sourceId: string): Promise<string> {
   return file.text();
 }
 
-export async function readStyleSourceSample(sourceId: string): Promise<string> {
-  const text = await readStyleSourceText(sourceId);
-  if (text.length <= SAMPLE_SECTION_COUNT * SAMPLE_CHARACTERS_PER_SECTION) return text;
-  const sections: string[] = [];
-  const maximumStart = text.length - SAMPLE_CHARACTERS_PER_SECTION;
-  for (let index = 0; index < SAMPLE_SECTION_COUNT; index += 1) {
-    const approximateStart = Math.round(maximumStart * index / (SAMPLE_SECTION_COUNT - 1));
+function analysisPassages(text: string): string[] {
+  const chapterStarts = [...text.matchAll(CHAPTER_HEADING_PATTERN)]
+    .map((match) => match.index ?? 0)
+    .filter((start, index, values) => index === 0 || start > values[index - 1]);
+  const passages: string[] = [];
+  if (chapterStarts.length >= MIN_CHAPTER_HEADING_COUNT) {
+    const count = Math.min(ANALYSIS_PASSAGE_COUNT, chapterStarts.length);
+    for (let index = 0; index < count; index += 1) {
+      const chapterIndex = Math.round((chapterStarts.length - 1) * index / Math.max(1, count - 1));
+      const start = chapterStarts[chapterIndex];
+      const end = chapterStarts[chapterIndex + 1] ?? text.length;
+      const passage = text.slice(start, Math.min(end, start + ANALYSIS_PASSAGE_CHARACTERS)).trim();
+      if (passage) passages.push(passage);
+    }
+    return passages;
+  }
+  const count = Math.min(ANALYSIS_PASSAGE_COUNT, Math.max(1, Math.ceil(text.length / ANALYSIS_PASSAGE_CHARACTERS)));
+  const maximumStart = Math.max(0, text.length - ANALYSIS_PASSAGE_CHARACTERS);
+  for (let index = 0; index < count; index += 1) {
+    const approximateStart = Math.round(maximumStart * index / Math.max(1, count - 1));
     const paragraphStart = text.lastIndexOf("\n", approximateStart);
     const start = Math.max(0, paragraphStart >= approximateStart - 500 ? paragraphStart + 1 : approximateStart);
-    sections.push(`[样本 ${index + 1}/${SAMPLE_SECTION_COUNT}]\n${text.slice(start, start + SAMPLE_CHARACTERS_PER_SECTION)}`);
+    const passage = text.slice(start, start + ANALYSIS_PASSAGE_CHARACTERS).trim();
+    if (passage) passages.push(passage);
   }
-  return sections.join("\n\n");
+  return passages;
+}
+
+export async function readStyleSourceAnalysisBatches(sourceId: string): Promise<StyleAnalysisBatch[]> {
+  const text = await readStyleSourceText(sourceId);
+  const passages = analysisPassages(text);
+  if (!passages.length) throw new Error("参考书中没有可分析的正文");
+  const total = Math.ceil(passages.length / ANALYSIS_BATCH_SIZE);
+  return Array.from({ length: total }, (_, batchIndex) => {
+    const start = batchIndex * ANALYSIS_BATCH_SIZE;
+    const selected = passages.slice(start, start + ANALYSIS_BATCH_SIZE);
+    const end = start + selected.length;
+    return {
+      label: `章节样本 ${start + 1}-${end}`,
+      passageCount: selected.length,
+      text: selected.map((passage, index) => `[样本 ${start + index + 1}/${passages.length}]\n${passage}`).join("\n\n"),
+    };
+  });
+}
+
+export async function readStyleSourceSample(sourceId: string): Promise<string> {
+  const batches = await readStyleSourceAnalysisBatches(sourceId);
+  return batches.map((batch) => batch.text.slice(0, ANALYSIS_PASSAGE_CHARACTERS + 200)).join("\n\n");
 }
 
 export async function deleteStyleSource(sourceId: string): Promise<void> {

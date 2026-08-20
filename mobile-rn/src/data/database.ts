@@ -283,6 +283,15 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
 
     DELETE FROM app_settings
     WHERE key LIKE 'plugin.lorn-style-evolution.guide.%';
+
+    DELETE FROM chat_sessions
+    WHERE model_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM models WHERE models.id = chat_sessions.model_id);
+    DELETE FROM models
+    WHERE NOT EXISTS (SELECT 1 FROM providers WHERE providers.id = models.provider_id);
+    DELETE FROM app_settings
+    WHERE key = 'activeModelId'
+      AND NOT EXISTS (SELECT 1 FROM models WHERE models.id = app_settings.value);
   `);
   await migrateChatSessions(database);
 }

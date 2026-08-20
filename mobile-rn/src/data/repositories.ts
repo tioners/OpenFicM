@@ -15,6 +15,7 @@ import type {
   WorldInfo,
   WorldInfoEntry,
 } from "@/types";
+import { MAX_CONFIGURED_OUTPUT_TOKENS } from "@/llm/limits";
 
 import { getDatabase } from "./database";
 
@@ -484,6 +485,8 @@ export async function deleteProvider(provider: Provider): Promise<void> {
       ? await txn.getFirstAsync<{ provider_id: string }>("SELECT provider_id FROM models WHERE id = ?", active.value)
       : null;
     if (activeModel?.provider_id === provider.id) await txn.runAsync("DELETE FROM app_settings WHERE key = 'activeModelId'");
+    await txn.runAsync("UPDATE chat_sessions SET model_id = NULL WHERE model_id IN (SELECT id FROM models WHERE provider_id = ?)", provider.id);
+    await txn.runAsync("DELETE FROM models WHERE provider_id = ?", provider.id);
     await txn.runAsync("DELETE FROM providers WHERE id = ?", provider.id);
   });
   await SecureStore.deleteItemAsync(provider.apiKeyRef).catch(() => undefined);
@@ -492,8 +495,8 @@ export async function deleteProvider(provider: Provider): Promise<void> {
 export async function listModels(providerId?: string): Promise<Model[]> {
   const db = await getDatabase();
   const rows = providerId
-    ? await db.getAllAsync<ModelRow>("SELECT * FROM models WHERE provider_id = ? ORDER BY name", providerId)
-    : await db.getAllAsync<ModelRow>("SELECT * FROM models ORDER BY name");
+    ? await db.getAllAsync<ModelRow>("SELECT models.* FROM models INNER JOIN providers ON providers.id = models.provider_id WHERE models.provider_id = ? ORDER BY models.name", providerId)
+    : await db.getAllAsync<ModelRow>("SELECT models.* FROM models INNER JOIN providers ON providers.id = models.provider_id ORDER BY models.name");
   return rows.map(mapModel);
 }
 
@@ -503,7 +506,9 @@ export async function saveModel(input: Omit<Model, "id"> & { id?: string }): Pro
   const name = requiredText(input.name, "模型名称");
   const modelId = requiredText(input.modelId, "模型 ID");
   if (!Number.isFinite(input.temperature) || input.temperature < 0 || input.temperature > 2) throw new Error("温度必须在 0 到 2 之间");
-  if (!Number.isInteger(input.maxTokens) || input.maxTokens < 1) throw new Error("最大输出 Token 数必须是正整数");
+  if (!Number.isInteger(input.maxTokens) || input.maxTokens < 1 || input.maxTokens > MAX_CONFIGURED_OUTPUT_TOKENS) {
+    throw new Error(`最大输出 Token 数必须在 1 到 ${MAX_CONFIGURED_OUTPUT_TOKENS} 之间；1M 通常是上下文窗口，不是单次输出上限`);
+  }
   const provider = await db.getFirstAsync<{ id: string }>("SELECT id FROM providers WHERE id = ?", input.providerId);
   if (!provider) throw new Error("供应商不存在");
   await db.withExclusiveTransactionAsync(async (txn) => {

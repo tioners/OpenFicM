@@ -384,7 +384,7 @@ function systemPrompt(input: {
   if (input.catalog.activeStyleProfile && shouldInjectAuthorStyleGuide(input.agent, input.userRequest)) {
     const profile = input.catalog.activeStyleProfile;
     const profileType = profile.kind === "author" ? "作者文风" : "参考小说文风";
-    sections.push(`当前创作使用的${profileType}是“${profile.name} V${profile.version}”：\n${profile.guide}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。不得复制参考小说原句或专有表达。`);
+    sections.push(`当前创作使用的${profileType}是“${profile.name} V${profile.version}”：\n${truncate(profile.guide, 16_000)}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。不得复制参考小说原句或专有表达。`);
   }
   const enabledRules = input.catalog.rules.filter((rule) => rule.enabled && rule.content.trim());
   if (enabledRules.length) {
@@ -499,11 +499,11 @@ async function selectionForAgent(agent: AgentDefinition, fallback: ModelSelectio
   if (!agent.modelId || agent.modelId === fallback.model.id) return fallback;
   const [models, providers] = await Promise.all([listModels(), listProviders()]);
   const model = models.find((item) => item.id === agent.modelId);
-  if (!model) throw new Error(`${agent.name} 配置的模型不存在`);
+  if (!model) return fallback;
   const provider = providers.find((item) => item.id === model.providerId);
-  if (!provider) throw new Error(`${agent.name} 配置的模型供应商不存在`);
+  if (!provider) return fallback;
   const apiKey = await getProviderApiKey(provider);
-  if (!apiKey) throw new Error(`${agent.name} 的模型供应商没有可用 API Key`);
+  if (!apiKey) return fallback;
   return { model, provider, apiKey };
 }
 
@@ -560,6 +560,7 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   let collaborationReminderSent = false;
   let fallbackDelegationAttempted = false;
   let delegationSucceeded = false;
+  let collaborationUnavailable = false;
 
   if (input.requiredSkill) {
     const skillEventId = input.recorder.add({
@@ -607,7 +608,7 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
         ].filter(Boolean).join("、");
         initialReminders.push(`尚未完成${missingChecks}一致性检查。现在调用对应 list/read 工具核对；发现已确认的新事实时使用 create/edit 工具同步。`);
       }
-      if (input.collaborationRequired && !delegationSucceeded && !collaborationReminderSent) {
+      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable && !collaborationReminderSent) {
         collaborationReminderSent = true;
         initialReminders.push("这是复杂创作任务，必须先调用 delegate_agent 让一个匹配的专业子智能体参与，再整合其结果。");
       }
@@ -616,11 +617,11 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
         continue;
       }
 
-      if (input.collaborationRequired && !delegationSucceeded && !fallbackDelegationAttempted) {
+      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable && !fallbackDelegationAttempted) {
         fallbackDelegationAttempted = true;
         const delegates = enabledDelegates(input.catalog, input.agent);
         const childAgent = fallbackDelegate(delegates, input.userRequest);
-        const task = `请作为专业子智能体参与以下创作任务。先用工具读取当前作品的必要资料，再给出可供主智能体整合的具体成果。若用户已确认新的角色或世界设定，请同步更新；若仍有关键歧义，使用 ask_user。\n\n用户任务：${input.userRequest}\n\n主智能体当前草案：${turn.content || "尚无"}`;
+        const task = `请作为专业子智能体参与以下创作任务。先用工具读取当前作品的必要资料，再给出可供主智能体整合的具体成果。若用户已确认新的角色或世界设定，请同步更新；若仍有关键歧义，使用 ask_user。\n\n用户任务：${truncate(input.userRequest, 12_000)}\n\n主智能体当前草案：${truncate(turn.content || "尚无", 12_000)}`;
         const call: AgentToolCall = {
           id: createId(),
           name: "delegate_agent",
@@ -675,7 +676,12 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           input.recorder.update(eventId, { status: "error", detail: message });
-          throw new Error(`复杂任务的子智能体协作失败：${message}`);
+          collaborationUnavailable = true;
+          messages.push({
+            role: "system",
+            content: `子智能体协作未成功（${message}）。请继续由主智能体完成任务，并在最终答复中说明协作受限。`,
+          });
+          continue;
         }
       }
 
@@ -688,10 +694,23 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
           });
           continue;
         }
-        throw new Error("角色与世界书一致性检查未完成，已停止本次任务");
+        if (consistencyEventId) {
+          input.recorder.update(consistencyEventId, {
+            status: "error",
+            detail: "本轮未能完成全部一致性检查，主智能体已返回当前结果；下轮任务会继续检查",
+          });
+        }
+        return {
+          content: `${turn.content || "模型没有返回内容"}\n\n提示：本轮角色或世界书一致性检查未全部完成，下一轮任务会继续补查。`,
+          consistencyRequired,
+          characterConsistencyChecked,
+          worldConsistencyChecked,
+          consistencyEventId,
+          delegationSucceeded,
+        };
       }
-      if (input.collaborationRequired && !delegationSucceeded) {
-        throw new Error("复杂任务未完成专业子智能体协作，已停止本次任务");
+      if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable) {
+        throw new Error("复杂任务未完成专业子智能体协作");
       }
       if (consistencyRequired && consistencyEventId) {
         input.recorder.update(consistencyEventId, {
@@ -865,6 +884,7 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         input.recorder.update(eventId, { status: "error", detail: message });
+        if (call.name === "delegate_agent") collaborationUnavailable = true;
         messages.push({
           role: "tool",
           content: JSON.stringify({ error: message }),

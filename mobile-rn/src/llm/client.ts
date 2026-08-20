@@ -2,8 +2,11 @@ import type { ModelSelection } from "@/types";
 import { getSetting } from "@/data/repositories";
 
 import type { AgentMessage, AgentToolCall, AgentToolDefinition, ModelTurn } from "./types";
+import { normalizeMaxOutputTokens } from "./limits";
 
 const REQUEST_TIMEOUT_MS = 120_000;
+const MAX_REQUEST_ATTEMPTS = 3;
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -20,40 +23,99 @@ function parseJsonObject(value: string): Record<string, unknown> {
   }
 }
 
+function openAiExtraContent(call: Record<string, any>): Record<string, unknown> | undefined {
+  const candidates = [call.extra_content, call.extraContent, call.provider_metadata, call.providerMetadata];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate) || !Object.keys(candidate).length) continue;
+    if (isRecord(candidate.openAiExtraContent)) return candidate.openAiExtraContent;
+    if (typeof candidate.geminiThoughtSignature === "string" && candidate.geminiThoughtSignature.trim()) {
+      return { google: { thought_signature: candidate.geminiThoughtSignature } };
+    }
+    return candidate;
+  }
+  const signature = call.thought_signature ?? call.thoughtSignature;
+  if (typeof signature === "string" && signature.trim()) {
+    return { google: { thought_signature: signature } };
+  }
+  return undefined;
+}
+
+function errorDetail(data: Record<string, any>, text: string, statusText: string): string {
+  const candidates = [
+    isRecord(data.error) ? data.error.message : data.error,
+    isRecord(data.error) ? data.error.detail : undefined,
+    data.message,
+    data.detail,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const primary = candidates[0]?.trim();
+  if (primary && !/^\d{3}$/.test(primary)) return primary;
+  const raw = text.trim();
+  if (raw && !/^\{?\s*"?error"?\s*:\s*"?\d{3}"?\s*\}?$/i.test(raw)) return raw.slice(0, 4_000);
+  return primary || statusText || "供应商未返回错误详情";
+}
+
+function retryDelay(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(30_000, seconds * 1_000);
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) return Math.min(30_000, Math.max(0, date - Date.now()));
+  }
+  return Math.min(8_000, 1_500 * 2 ** attempt);
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function requestJson(url: string, init: RequestInit): Promise<Record<string, any>> {
-  const controller = new AbortController();
   const configuredTimeout = Number(await getSetting("connections.requestTimeout"));
   const requestTimeout = Number.isInteger(configuredTimeout) && configuredTimeout >= 10_000 && configuredTimeout <= 300_000
     ? configuredTimeout
     : REQUEST_TIMEOUT_MS;
-  const timeout = setTimeout(() => controller.abort(), requestTimeout);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const text = await response.text();
-    let data: Record<string, any> = {};
-    if (text) {
-      try {
-        const parsed: unknown = JSON.parse(text);
-        if (isRecord(parsed)) data = parsed;
-      } catch {
-        if (response.ok) throw new Error("模型服务返回了无法解析的非 JSON 响应");
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), requestTimeout);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      const text = await response.text();
+      let data: Record<string, any> = {};
+      if (text) {
+        try {
+          const parsed: unknown = JSON.parse(text);
+          if (isRecord(parsed)) data = parsed;
+        } catch {
+          if (response.ok) throw new Error("模型服务返回了无法解析的非 JSON 响应");
+        }
       }
+      if (response.ok) return data;
+      const detail = errorDetail(data, text, response.statusText);
+      const requestError = new Error(`HTTP ${response.status}: ${detail}`);
+      lastError = requestError;
+      // Surface rate limiting immediately so one failed agent turn cannot amplify it.
+      const maxAttempts = response.status === 429 ? 1 : MAX_REQUEST_ATTEMPTS;
+      if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt + 1 >= maxAttempts) throw requestError;
+      await sleep(retryDelay(response, attempt));
+    } catch (error) {
+      if (isRecord(error) && error.name === "AbortError") {
+        lastError = new Error("模型请求超时，请检查网络或 Base URL");
+      } else if (error instanceof TypeError) {
+        const detail = error.message.trim();
+        lastError = new Error(`fetch failed${detail ? `: ${detail}` : ""}`);
+      } else {
+        lastError = error;
+      }
+      if (attempt + 1 >= MAX_REQUEST_ATTEMPTS || !(error instanceof TypeError || (isRecord(error) && error.name === "AbortError"))) {
+        throw lastError;
+      }
+      await sleep(Math.min(4_000, 1_000 * 2 ** attempt));
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!response.ok) {
-      const detail = (isRecord(data.error) ? data.error.message : undefined) ?? data.message ?? text ?? response.statusText;
-      throw new Error(`${response.status}: ${detail}`);
-    }
-    return data;
-  } catch (error) {
-    if (isRecord(error) && error.name === "AbortError") throw new Error("模型请求超时，请检查网络或 Base URL");
-    if (error instanceof TypeError) {
-      const detail = error.message.trim();
-      throw new Error(`fetch failed${detail ? `: ${detail}` : ""}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
   }
+  throw lastError instanceof Error ? lastError : new Error("模型请求失败");
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -67,6 +129,7 @@ async function callOpenAi(
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
 ): Promise<ModelTurn> {
+  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
   const data = await requestJson(`${normalizeBaseUrl(selection.provider.baseUrl)}/chat/completions`, {
     method: "POST",
     headers: {
@@ -76,18 +139,21 @@ async function callOpenAi(
     body: JSON.stringify({
       model: selection.model.modelId,
       temperature: selection.model.temperature,
-      max_tokens: selection.model.maxTokens,
+      max_tokens: maxOutputTokens,
       messages: messages.map((message) => ({
         role: message.role,
-        content: message.content,
-        ...(message.toolCalls ? {
+        content: message.toolCalls?.length ? (message.content || null) : message.content,
+        ...(message.toolCalls?.length ? {
           tool_calls: message.toolCalls.map((call) => ({
             id: call.id,
             type: "function",
             function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+            ...(call.providerMetadata?.openAiExtraContent
+              ? { extra_content: call.providerMetadata.openAiExtraContent }
+              : {}),
           })),
         } : {}),
-        ...(message.toolCallId ? { tool_call_id: message.toolCallId, name: message.toolName } : {}),
+        ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
       })),
       ...(tools.length ? {
         tools: tools.map((tool) => ({ type: "function", function: tool })),
@@ -96,11 +162,17 @@ async function callOpenAi(
     }),
   });
   const message = data.choices?.[0]?.message ?? {};
-  const toolCalls: AgentToolCall[] = (message.tool_calls ?? []).map((call: any) => ({
-    id: String(call.id),
-    name: String(call.function?.name ?? ""),
-    arguments: parseJsonObject(String(call.function?.arguments ?? "{}")),
-  }));
+  const toolCalls: AgentToolCall[] = (message.tool_calls ?? [])
+    .filter((call: unknown): call is Record<string, any> => isRecord(call))
+    .map((call: Record<string, any>) => {
+      const metadata = openAiExtraContent(call);
+      return {
+        id: String(call.id ?? ""),
+        name: String(call.function?.name ?? ""),
+        arguments: parseJsonObject(String(call.function?.arguments ?? "{}")),
+        ...(metadata ? { providerMetadata: { openAiExtraContent: metadata } } : {}),
+      };
+    });
   return { content: typeof message.content === "string" ? message.content : "", toolCalls };
 }
 
@@ -111,10 +183,16 @@ function toGeminiSchema(value: unknown): unknown {
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(source)) {
     if (key === "type" && typeof item === "string") output[key] = item.toUpperCase();
+    else if (key === "required" && Array.isArray(item) && item.length === 0) continue;
     else if (key !== "additionalProperties") output[key] = toGeminiSchema(item);
   }
   if (!output.type && isRecord(source.properties)) output.type = "OBJECT";
   if (!output.type && source.items) output.type = "ARRAY";
+  if (!output.type && Array.isArray(source.enum) && source.enum.length) {
+    const sample = source.enum[0];
+    output.type = typeof sample === "number" ? "NUMBER" : typeof sample === "boolean" ? "BOOLEAN" : "STRING";
+  }
+  if (!output.type) output.type = "STRING";
   return output;
 }
 
@@ -153,6 +231,7 @@ async function callGemini(
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
 ): Promise<ModelTurn> {
+  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
   const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const baseUrl = normalizeBaseUrl(selection.provider.baseUrl);
   const url = `${baseUrl}/models/${encodeURIComponent(selection.model.modelId)}:generateContent`;
@@ -171,7 +250,7 @@ async function callGemini(
       } : {}),
       generationConfig: {
         temperature: selection.model.temperature,
-        maxOutputTokens: selection.model.maxTokens,
+        maxOutputTokens,
       },
     }),
   });
@@ -184,8 +263,8 @@ async function callGemini(
     id: `gemini-${Date.now()}-${index}`,
     name: String(part.functionCall.name),
     arguments: isRecord(part.functionCall.args) ? part.functionCall.args : {},
-    ...(typeof part.thoughtSignature === "string" ? {
-      providerMetadata: { geminiThoughtSignature: part.thoughtSignature },
+    ...(typeof (part.thoughtSignature ?? part.thought_signature) === "string" ? {
+      providerMetadata: { geminiThoughtSignature: part.thoughtSignature ?? part.thought_signature },
     } : {}),
   }));
   return {
@@ -225,6 +304,7 @@ async function callAnthropic(
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
 ): Promise<ModelTurn> {
+  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
   const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const data = await requestJson(`${normalizeBaseUrl(selection.provider.baseUrl)}/messages`, {
     method: "POST",
@@ -237,7 +317,7 @@ async function callAnthropic(
       model: selection.model.modelId,
       system,
       temperature: selection.model.temperature,
-      max_tokens: selection.model.maxTokens,
+      max_tokens: maxOutputTokens,
       messages: anthropicMessages(messages),
       ...(tools.length ? {
         tools: tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })),

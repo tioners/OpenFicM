@@ -1,6 +1,6 @@
 {
   "name": "openficm",
-  "version": "0.7.1",
+  "version": "0.7.3",
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

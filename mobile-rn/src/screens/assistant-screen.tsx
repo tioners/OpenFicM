@@ -118,6 +118,12 @@ function humanizeAgentError(error: unknown): { message: string; detail: string }
   if (/fetch failed|network request failed|unable to connect|cannot connect/.test(normalized)) {
     return { message: "网络连接异常，请检查网络、Base URL 和证书设置后重试", detail };
   }
+  if (/\bhttp\s*400\b|\b400\s*:/.test(normalized)) {
+    return { message: "供应商拒绝了本次请求（400），请检查模型工具调用兼容性后重试", detail };
+  }
+  if (/\bhttp\s*429\b|\b429\s*:/.test(normalized)) {
+    return { message: "供应商暂时限流（429），请稍后重试或更换模型", detail };
+  }
   return { message: detail, detail };
 }
 
@@ -257,6 +263,9 @@ export function AssistantScreen() {
       const nextDefaultModelId = nextModels.find((model) => model.id === activeAgent?.modelId)?.id
         ?? nextModels.find((model) => model.id === activeModelId)?.id
         ?? null;
+      if (activeModelId && !nextModels.some((model) => model.id === activeModelId)) {
+        await setSetting("activeModelId", "");
+      }
       let nextSessions = storedSessions;
       let nextSession = nextSessions.find((session) => session.id === preferredSessionId) ?? nextSessions[0] ?? null;
       if (!nextSession) {
@@ -266,6 +275,10 @@ export function AssistantScreen() {
       const selectedModelId = nextModels.some((model) => model.id === nextSession?.modelId)
         ? nextSession.modelId
         : nextDefaultModelId;
+      if (nextSession.modelId !== selectedModelId) {
+        nextSession = await updateChatSession({ id: nextSession.id, modelId: selectedModelId });
+        nextSessions = nextSessions.map((session) => session.id === nextSession?.id ? nextSession as ChatSession : session);
+      }
       const nextMessages = await listMessages(nextSession.id);
       let nextSelection: ModelSelection | null = null;
       let selectionError: string | null = null;

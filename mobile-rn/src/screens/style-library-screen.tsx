@@ -27,7 +27,11 @@ import {
 } from "@/data/style-repositories";
 import { resolveModelSelection } from "@/llm/selection";
 import type { RootStackParamList } from "@/navigation/types";
-import { distillReferenceStyle } from "@/settings/lorn-style-plugin";
+import {
+  distillReferenceStyle,
+  getStyleDistillationCheckpoint,
+  type StyleDistillationCheckpoint,
+} from "@/settings/lorn-style-plugin";
 import { importStyleSource, deleteStyleSource } from "@/style/source-library";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
@@ -55,6 +59,9 @@ export function StyleLibraryScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [distillationError, setDistillationError] = useState<string | null>(null);
+  const [distillationProgress, setDistillationProgress] = useState("");
+  const [distillationCheckpoint, setDistillationCheckpoint] = useState<StyleDistillationCheckpoint | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [editingSource, setEditingSource] = useState(false);
   const [editingAuthorGuide, setEditingAuthorGuide] = useState(false);
@@ -96,8 +103,15 @@ export function StyleLibraryScreen() {
     setEditingSource(false);
     setSourceTitle(source.title);
     setError(null);
+    setDistillationError(null);
+    setDistillationProgress("");
     try {
-      setSourceProfiles(await listStyleProfilesForSource(source.id));
+      const [nextProfiles, checkpoint] = await Promise.all([
+        listStyleProfilesForSource(source.id),
+        getStyleDistillationCheckpoint(source.id),
+      ]);
+      setSourceProfiles(nextProfiles);
+      setDistillationCheckpoint(checkpoint);
     } catch (sourceError) {
       setError(sourceError instanceof Error ? sourceError.message : String(sourceError));
       setSourceProfiles([]);
@@ -109,6 +123,9 @@ export function StyleLibraryScreen() {
     setSelectedSource(null);
     setSourceProfiles([]);
     setEditingSource(false);
+    setDistillationError(null);
+    setDistillationProgress("");
+    setDistillationCheckpoint(null);
   };
 
   const importBook = async () => {
@@ -135,18 +152,31 @@ export function StyleLibraryScreen() {
     if (profile.kind === "author") setAuthorGuide(profile.guide);
   };
 
-  const distill = async () => {
+  const distill = async (restart = false) => {
     if (!selectedSource) return;
     setBusy(true);
     setError(null);
+    setDistillationError(null);
+    setDistillationProgress("准备蒸馏章节样本");
     try {
       const selection = await resolveModelSelection();
-      const profile = await distillReferenceStyle({ sourceId: selectedSource.id, selection });
+      const profile = await distillReferenceStyle({
+        sourceId: selectedSource.id,
+        selection,
+        restart,
+        onProgress: ({ label, completed, total }) => {
+          setDistillationProgress(total > 1 ? `${label}（${completed}/${total}）` : label);
+        },
+      });
       setSourceProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
       setProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)]);
+      setDistillationCheckpoint(null);
       openProfile(profile);
     } catch (distillError) {
-      setError(distillError instanceof Error ? distillError.message : String(distillError));
+      const message = distillError instanceof Error ? distillError.message : String(distillError);
+      setError(message);
+      setDistillationError(message);
+      setDistillationCheckpoint(await getStyleDistillationCheckpoint(selectedSource.id).catch(() => null));
     } finally {
       setBusy(false);
     }
@@ -362,6 +392,7 @@ export function StyleLibraryScreen() {
               ) : (
                 <View style={styles.inlineActions}>
                   <Button label="蒸馏文风" onPress={() => void distill()} disabled={busy} loading={busy} />
+                  {distillationCheckpoint ? <Button label="重新开始" variant="secondary" onPress={() => void distill(true)} disabled={busy} /> : null}
                   <Pressable accessibilityLabel="重命名参考书" onPress={() => setEditingSource(true)} style={styles.secondaryIconAction}>
                     <Ionicons name="create-outline" size={21} color={colors.text} />
                   </Pressable>
@@ -370,7 +401,18 @@ export function StyleLibraryScreen() {
                   </Pressable>
                 </View>
               )}
-              <Text style={styles.helperText}>蒸馏使用当前设置中的默认模型。模型请求失败时可更换供应商后再次蒸馏。</Text>
+              {distillationError ? <ErrorNotice message={distillationError} onRetry={() => void distill()} /> : null}
+              {distillationCheckpoint ? (
+                <View style={styles.checkpointBox}>
+                  <Text style={styles.checkpointTitle}>检测到未完成的蒸馏任务</Text>
+                  <Text style={styles.checkpointText}>已完成 {Math.min(distillationCheckpoint.completedMemos.length, distillationCheckpoint.batchCount)}/{distillationCheckpoint.batchCount} 批。点击“蒸馏文风”会从断点继续，不会重复已完成批次。</Text>
+                </View>
+              ) : null}
+              {distillationProgress ? (
+                <Text style={styles.progressText}>{distillationProgress}</Text>
+              ) : (
+                <Text style={styles.helperText}>按全书章节分布抽取最多 24 段，分批分析后汇总，不会上传整本小说。蒸馏使用当前设置中的默认模型。</Text>
+              )}
               <Text style={styles.sectionTitle}>参考文风版本</Text>
               {sourceProfiles.length ? sourceProfiles.map((profile) => (
                 <ProfileRow
@@ -509,6 +551,10 @@ const styles = StyleSheet.create({
   inlineActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   secondaryIconAction: { width: 46, height: 46, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
   helperText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  progressText: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: "600" },
+  checkpointBox: { gap: spacing.xs, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  checkpointTitle: { color: colors.primary, fontSize: 13, fontWeight: "700" },
+  checkpointText: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   emptyHint: { color: colors.textMuted, fontSize: 14, lineHeight: 20, paddingVertical: spacing.md },
   guideText: { color: colors.text, fontSize: 14, lineHeight: 22 },
   guideInput: { minHeight: 300 },

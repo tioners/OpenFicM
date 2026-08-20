@@ -261,9 +261,12 @@ function clipInstructionBlock(value: string, maximumCharacters: number): string 
   return `${value.slice(0, headEnd > 0 ? headEnd : headLength).trimEnd()}${notice}${value.slice(tailStart >= 0 ? tailStart + 1 : value.length - tailLength).trimStart()}`;
 }
 
-export function compactLornDistillationInstructions(value: string): string {
+export function compactLornDistillationInstructions(
+  value: string,
+  maximumCharacters = MAX_LORN_RUNTIME_INSTRUCTIONS_CHARACTERS,
+): string {
   const normalized = value.trim();
-  if (normalized.length <= MAX_LORN_RUNTIME_INSTRUCTIONS_CHARACTERS) return normalized;
+  if (normalized.length <= maximumCharacters) return normalized;
   const blocks = normalized.split(/\n\n---\n\n/).map((block) => block.trim()).filter(Boolean);
   const selected = [
     ["# OpenFicM 移动端适配边界", 2_500],
@@ -282,7 +285,7 @@ export function compactLornDistillationInstructions(value: string): string {
     return [clipInstructionBlock(blocks[index], maximumCharacters)];
   });
   const compacted = runtimeBlocks.join("\n\n---\n\n");
-  return clipInstructionBlock(compacted || normalized, MAX_LORN_RUNTIME_INSTRUCTIONS_CHARACTERS);
+  return clipInstructionBlock(compacted || normalized, maximumCharacters);
 }
 
 export async function getLornDistillationInstructions(): Promise<string> {
