@@ -260,7 +260,6 @@ function requiresKnowledgeSynchronization(content: string): boolean {
 
 function requiresAgentCollaboration(content: string): boolean {
   if (/(多智能体|子智能体|agent|协作|分工)/i.test(content)) return true;
-  if (/(续写|扩写|改写|重写|润色|创作|写(?:一|这|第|下|后|个).{0,8}章|设计大纲|拆解剧情|审查正文|创作思路)/.test(content)) return true;
   const hasAction = /(帮我|请|需要|设计|规划|分析|审查|检查|完善|调整|生成|构建|梳理|推演)/.test(content);
   const dimensions = [
     /(章节|正文|文风|对话)/,
@@ -371,12 +370,12 @@ function systemPrompt(input: {
 作品、章节、角色、世界书和聊天记录都保存在本机；只有调用用户配置的模型 API 时联网。
 必须依据工具读取到的当前作品数据工作，不得把其他作品的信息混入本作品。
 用户明确给出新的创作决定、角色变化、世界规则或剧情事实时，不要只在聊天中复述：先读取现有角色与世界书，确认属于正式设定后，调用 create/edit 工具同步到作品。若内容仍是脑暴、存在多种解释或是否采用尚不明确，先调用 ask_user 让用户确认，再写入；不得把未确认的备选想法当作正式设定。
-章节新增或修改后，在最终答复前必须分别检查角色与世界书是否仍与正文一致：至少调用一次角色 list/read 工具，并至少调用一次世界书 list/read 工具；确认出现新事实或设定变化时，调用对应 create/edit 工具同步。没有变化时也要完成两类检查。删除角色或世界书条目只响应用户明确要求。所有写工具仍受用户权限审批。
+章节新增或修改后，优先根据当前正文判断角色或世界书是否真的发生变化；发现已确认的新事实时调用对应 create/edit 工具同步。不要为了形式上的检查阻塞当前任务，也不要在没有变化时反复读取全部资料。删除角色或世界书条目只响应用户明确要求。所有写工具仍受用户权限审批。
 任务存在会显著影响结果的偏好或歧义时，使用 ask_user 提出一至三个互不依赖的问题；简单问题不要反问。
 技能不能只凭名称假设内容；任务匹配技能说明时，先调用 activate_skill 加载完整指令。工具参数必须严格符合声明。`];
 
   if (input.consistencyReason) {
-    sections.push(`检测到需要同步检查的作品变动：${input.consistencyReason}\n本轮结束前必须完成角色和世界书一致性检查；确认的新事实应写入对应资料。`);
+    sections.push(`检测到需要关注的作品变动：${input.consistencyReason}\n优先根据当前任务判断是否需要同步角色或世界书；确认的新事实应写入对应资料，不要为了形式检查阻塞本轮任务。`);
   }
   if (input.agent.systemPrompt.trim()) {
     sections.push(`当前智能体定义：\n${input.agent.systemPrompt.trim()}`);
@@ -556,7 +555,6 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   let characterConsistencyChecked = false;
   let worldConsistencyChecked = false;
   let consistencyEventId = input.consistencyEventId;
-  let consistencyReminderCount = 0;
   let collaborationReminderSent = false;
   let fallbackDelegationAttempted = false;
   let delegationSucceeded = false;
@@ -600,14 +598,6 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
     if (turn.toolCalls.length === 0) {
       const consistencyChecked = characterConsistencyChecked && worldConsistencyChecked;
       const initialReminders: string[] = [];
-      if (consistencyRequired && !consistencyChecked && consistencyReminderCount === 0) {
-        consistencyReminderCount += 1;
-        const missingChecks = [
-          !characterConsistencyChecked ? "角色" : "",
-          !worldConsistencyChecked ? "世界书" : "",
-        ].filter(Boolean).join("、");
-        initialReminders.push(`尚未完成${missingChecks}一致性检查。现在调用对应 list/read 工具核对；发现已确认的新事实时使用 create/edit 工具同步。`);
-      }
       if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable && !collaborationReminderSent) {
         collaborationReminderSent = true;
         initialReminders.push("这是复杂创作任务，必须先调用 delegate_agent 让一个匹配的专业子智能体参与，再整合其结果。");
@@ -645,7 +635,8 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
             selection: childSelection,
             history: [{ role: "user", content: task }],
             agent: childAgent,
-            consistencyEventId,
+            consistencyReason: null,
+            consistencyEventId: null,
             collaborationRequired: false,
             requiredSkill: requiredSkillForRequest(input.catalog, childAgent, task),
             userRequest: task,
@@ -685,29 +676,11 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
         }
       }
 
-      if (consistencyRequired && !consistencyChecked) {
-        if (consistencyReminderCount < 2) {
-          consistencyReminderCount += 1;
-          messages.push({
-            role: "system",
-            content: "角色或世界书一致性检查仍未完成。必须立即调用缺少的 list/read 工具，不能直接结束。",
-          });
-          continue;
-        }
-        if (consistencyEventId) {
-          input.recorder.update(consistencyEventId, {
-            status: "error",
-            detail: "本轮未能完成全部一致性检查，主智能体已返回当前结果；下轮任务会继续检查",
-          });
-        }
-        return {
-          content: `${turn.content || "模型没有返回内容"}\n\n提示：本轮角色或世界书一致性检查未全部完成，下一轮任务会继续补查。`,
-          consistencyRequired,
-          characterConsistencyChecked,
-          worldConsistencyChecked,
-          consistencyEventId,
-          delegationSucceeded,
-        };
+      if (consistencyRequired && consistencyEventId && !consistencyChecked) {
+        input.recorder.update(consistencyEventId, {
+          status: "completed",
+          detail: "已完成本轮创作；仅在发现明确设定变化时同步角色或世界书",
+        });
       }
       if (input.collaborationRequired && !delegationSucceeded && !collaborationUnavailable) {
         throw new Error("复杂任务未完成专业子智能体协作");
@@ -790,7 +763,8 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
             selection: childSelection,
             history: [{ role: "user", content: task }],
             agent: childAgent,
-            consistencyEventId,
+            consistencyReason: null,
+            consistencyEventId: null,
             collaborationRequired: false,
             requiredSkill: requiredSkillForRequest(input.catalog, childAgent, task),
             userRequest: task,
@@ -841,11 +815,10 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
           if (call.name === "save_reference_style_profile") {
             input.catalog.availableStyleProfiles = await listStyleProfiles(input.project.id);
           }
-          if (call.name === "write_chapter" || call.name === "edit_chapter") {
+          if ((call.name === "write_chapter" || call.name === "edit_chapter") && input.depth === 0) {
             consistencyRequired = true;
             characterConsistencyChecked = false;
             worldConsistencyChecked = false;
-            consistencyReminderCount = 0;
             if (!consistencyEventId) {
               consistencyEventId = input.recorder.add({
                 kind: "consistency",
@@ -972,7 +945,7 @@ export async function runAgent(input: {
       userRequest,
       depth: 0,
     });
-    if (result.consistencyRequired && result.characterConsistencyChecked && result.worldConsistencyChecked) {
+    if (result.consistencyRequired) {
       await setSetting(consistencyKey, "");
     }
     recorder.complete();
