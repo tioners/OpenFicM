@@ -65,6 +65,7 @@ export function StyleLibraryScreen() {
   const [distillationProgress, setDistillationProgress] = useState("");
   const [distillationCheckpoint, setDistillationCheckpoint] = useState<StyleDistillationCheckpoint | null>(null);
   const [distillationCoverage, setDistillationCoverage] = useState<StyleDistillationCoverage | null>(null);
+  const [distillationModelName, setDistillationModelName] = useState<string | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [editingSource, setEditingSource] = useState(false);
   const [editingAuthorGuide, setEditingAuthorGuide] = useState(false);
@@ -94,6 +95,10 @@ export function StyleLibraryScreen() {
       setProfiles(nextProfiles);
       setActiveProfile(nextActive);
       if (nextActive?.kind === "author") setAuthorGuide(nextActive.guide);
+      // 蒸馏跟随全局默认模型，界面上要说清楚是哪一个。
+      setDistillationModelName(await resolveModelSelection()
+        .then((selection) => selection.model.name)
+        .catch(() => null));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
@@ -399,7 +404,7 @@ export function StyleLibraryScreen() {
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
               {editingSource ? (
                 <View style={styles.inlineActions}>
                   <Button label="取消" variant="secondary" onPress={() => setEditingSource(false)} />
@@ -449,8 +454,11 @@ export function StyleLibraryScreen() {
               {distillationProgress ? (
                 <Text style={styles.progressText}>{distillationProgress}</Text>
               ) : (
-                <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入文风指南，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书。蒸馏使用当前设置中的默认模型。</Text>
+                <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入文风指南，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书。</Text>
               )}
+              <Text style={styles.helperText}>
+                蒸馏使用“设置 → 模型与供应商”里的默认模型：{distillationModelName ?? "尚未选择默认模型"}
+              </Text>
               <Text style={styles.sectionTitle}>参考文风版本</Text>
               {sourceProfiles.length ? sourceProfiles.map((profile) => (
                 <ProfileRow
@@ -479,7 +487,7 @@ export function StyleLibraryScreen() {
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.profileContent}>
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.profileContent}>
               {selectedProfile?.kind === "author" && editingAuthorGuide ? (
                 <Field label="作者文风指南" value={authorGuide} onChangeText={setAuthorGuide} multiline style={styles.guideInput} maxLength={100000} />
               ) : (
@@ -580,6 +588,8 @@ const styles = StyleSheet.create({
   useButtonTextActive: { color: colors.textMuted },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   sheet: { maxHeight: "88%", borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, backgroundColor: colors.background },
+  // 父层只有 maxHeight，ScrollView 默认不收缩会把超出部分顶出可视区且滚不动，必须允许它收缩。
+  sheetScroll: { flexShrink: 1 },
   sheetHeader: { minHeight: 70, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingLeft: spacing.lg, paddingRight: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   sheetTitleWrap: { flex: 1, minWidth: 0 },
   sheetTitle: { color: colors.text, fontSize: 19, fontWeight: "700" },

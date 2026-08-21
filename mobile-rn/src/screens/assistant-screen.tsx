@@ -502,9 +502,10 @@ export function AssistantScreen() {
     let latestTrace: AgentRunTrace | null = null;
     let runSelection: ModelSelection | null = selection;
     try {
-      runSelection = retry?.modelId
-        ? await resolveSelection(retry.modelId, models, providers)
-        : selection;
+      // 当前选中的模型优先。失败消息里记录的 modelId 只作兜底，
+      // 否则用户换了可用模型后点重试仍会打回那个出错的旧模型。
+      runSelection = selection
+        ?? (retry?.modelId ? await resolveSelection(retry.modelId, models, providers) : null);
       if (!runSelection) throw new Error("请先配置可用模型");
       if (retry?.sourceMessageId) {
         await deleteMessagesFrom(sessionId, retry.sourceMessageId);

@@ -2,7 +2,7 @@ import type { ModelSelection } from "@/types";
 import { getSetting } from "@/data/repositories";
 
 import type { AgentMessage, AgentToolCall, AgentToolDefinition, ModelTurn } from "./types";
-import { normalizeMaxOutputTokens } from "./limits";
+import { MAX_CONFIGURED_OUTPUT_TOKENS, normalizeMaxOutputTokens } from "./limits";
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_REQUEST_ATTEMPTS = 3;
@@ -85,12 +85,19 @@ async function requestJson(url: string, init: RequestInit): Promise<Record<strin
       const text = await response.text();
       let data: Record<string, any> = {};
       if (text) {
+        let parsed: unknown;
         try {
-          const parsed: unknown = JSON.parse(text);
-          if (isRecord(parsed)) data = parsed;
+          parsed = JSON.parse(text);
         } catch {
-          if (response.ok) throw new Error("模型服务返回了无法解析的非 JSON 响应");
+          // 丢掉响应体会让这类故障完全无法诊断，带一段原文出来。
+          if (response.ok) throw new Error(`模型服务返回了无法解析的非 JSON 响应：${text.trim().slice(0, 300)}`);
         }
+        if (isRecord(parsed)) data = parsed;
+        else if (parsed !== undefined && response.ok) {
+          throw new Error(`模型服务返回的 JSON 不是对象：${text.trim().slice(0, 300)}`);
+        }
+      } else if (response.ok) {
+        throw new Error("模型服务返回了空响应体");
       }
       if (response.ok) return data;
       const detail = errorDetail(data, text, response.statusText);
@@ -130,8 +137,9 @@ async function callOpenAi(
   selection: ModelSelection,
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
+  const maxOutputTokens = resolveOutputTokens(selection, options);
   const data = await requestJson(`${normalizeBaseUrl(selection.provider.baseUrl)}/chat/completions`, {
     method: "POST",
     headers: {
@@ -163,7 +171,9 @@ async function callOpenAi(
       } : {}),
     }),
   });
-  const message = data.choices?.[0]?.message ?? {};
+  const choice = isRecord(data.choices?.[0]) ? data.choices[0] : {};
+  const message = choice.message ?? {};
+  const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason : "";
   const toolCalls: AgentToolCall[] = (message.tool_calls ?? [])
     .filter((call: unknown): call is Record<string, any> => isRecord(call))
     .map((call: Record<string, any>) => {
@@ -175,7 +185,18 @@ async function callOpenAi(
         ...(metadata ? { providerMetadata: { openAiExtraContent: metadata } } : {}),
       };
     });
-  return { content: typeof message.content === "string" ? message.content : "", toolCalls };
+  const content = typeof message.content === "string" ? message.content : "";
+  // 思考模型的推理 Token 也计入 max_tokens，正文可能一个字都没吐出来就被截断。
+  // 不做静默降级，否则调用方只会看到"内容为空"，无法判断该调高上限。
+  if (!content.trim() && !toolCalls.length) {
+    if (finishReason === "length") {
+      throw new Error(`模型在返回正文前就用完了 ${maxOutputTokens} 个输出 Token（finish_reason=length）。思考型模型的推理过程也计入这个上限，请在“设置 → 模型与供应商”调高最大输出 Token 数，或换用非思考模型。`);
+    }
+    if (finishReason && finishReason !== "stop") {
+      throw new Error(`模型没有返回内容，finish_reason=${finishReason}`);
+    }
+  }
+  return { content, toolCalls };
 }
 
 function toGeminiSchema(value: unknown): unknown {
@@ -232,8 +253,9 @@ async function callGemini(
   selection: ModelSelection,
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
+  const maxOutputTokens = resolveOutputTokens(selection, options);
   const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const baseUrl = normalizeBaseUrl(selection.provider.baseUrl);
   const url = `${baseUrl}/models/${encodeURIComponent(selection.model.modelId)}:generateContent`;
@@ -257,8 +279,12 @@ async function callGemini(
     }),
   });
   const parts: any[] = data.candidates?.[0]?.content?.parts ?? [];
+  const finishReason = String(data.candidates?.[0]?.finishReason ?? "");
   if (!parts.length) {
-    const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? "模型没有返回内容";
+    if (finishReason === "MAX_TOKENS") {
+      throw new Error(`模型在返回正文前就用完了 ${maxOutputTokens} 个输出 Token（finishReason=MAX_TOKENS）。思考型模型的推理过程也计入这个上限，请在“设置 → 模型与供应商”调高最大输出 Token 数。`);
+    }
+    const reason = data.promptFeedback?.blockReason ?? finishReason ?? "模型没有返回内容";
     throw new Error(`Gemini 请求未完成: ${reason}`);
   }
   const toolCalls = parts.filter((part) => part.functionCall).map((part, index) => ({
@@ -305,8 +331,9 @@ async function callAnthropic(
   selection: ModelSelection,
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  const maxOutputTokens = normalizeMaxOutputTokens(selection.model.maxTokens);
+  const maxOutputTokens = resolveOutputTokens(selection, options);
   const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const data = await requestJson(`${normalizeBaseUrl(selection.provider.baseUrl)}/messages`, {
     method: "POST",
@@ -327,20 +354,34 @@ async function callAnthropic(
     }),
   });
   const blocks: any[] = data.content ?? [];
-  return {
-    content: blocks.filter((block) => block.type === "text").map((block) => block.text).join(""),
-    toolCalls: blocks.filter((block) => block.type === "tool_use").map((block) => ({
-      id: String(block.id), name: String(block.name), arguments: block.input ?? {},
-    })),
-  };
+  const content = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+  const toolCalls = blocks.filter((block) => block.type === "tool_use").map((block) => ({
+    id: String(block.id), name: String(block.name), arguments: block.input ?? {},
+  }));
+  if (!content.trim() && !toolCalls.length && data.stop_reason === "max_tokens") {
+    throw new Error(`模型在返回正文前就用完了 ${maxOutputTokens} 个输出 Token（stop_reason=max_tokens）。请在“设置 → 模型与供应商”调高最大输出 Token 数。`);
+  }
+  return { content, toolCalls };
+}
+
+export interface ModelCallOptions {
+  /** 保证本次请求至少有这么多输出 Token。用于结构上必须长输出的步骤（例如文风汇总），不会低于用户自己配置的上限。 */
+  minOutputTokens?: number;
+}
+
+function resolveOutputTokens(selection: ModelSelection, options?: ModelCallOptions): number {
+  const configured = normalizeMaxOutputTokens(selection.model.maxTokens);
+  if (!options?.minOutputTokens) return configured;
+  return Math.min(MAX_CONFIGURED_OUTPUT_TOKENS, Math.max(configured, options.minOutputTokens));
 }
 
 export function callModel(
   selection: ModelSelection,
   messages: AgentMessage[],
   tools: AgentToolDefinition[],
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  if (selection.provider.type === "google-genai") return callGemini(selection, messages, tools);
-  if (selection.provider.type === "anthropic") return callAnthropic(selection, messages, tools);
-  return callOpenAi(selection, messages, tools);
+  if (selection.provider.type === "google-genai") return callGemini(selection, messages, tools, options);
+  if (selection.provider.type === "anthropic") return callAnthropic(selection, messages, tools, options);
+  return callOpenAi(selection, messages, tools, options);
 }

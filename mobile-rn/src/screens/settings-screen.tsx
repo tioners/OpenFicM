@@ -69,6 +69,7 @@ export function SettingsScreen() {
   const [fetchingProviderId, setFetchingProviderId] = useState<string | null>(null);
   const [modelPickerProvider, setModelPickerProvider] = useState<Provider | null>(null);
   const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
+  const [modelFilter, setModelFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
 
@@ -181,6 +182,7 @@ export function SettingsScreen() {
       const fetched = await fetchProviderModels(provider, key);
       if (!fetched.length) throw new Error("供应商没有返回可用于生成内容的模型");
       setRemoteModels(fetched);
+      setModelFilter("");
       setModelPickerProvider(provider);
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : String(fetchError));
@@ -194,8 +196,17 @@ export function SettingsScreen() {
     setSelectedProviderId(modelPickerProvider.id);
     setModelName(model.name);
     setModelId(model.id);
+    setModelFilter("");
     setModelPickerProvider(null);
   };
+
+  // 中转站常常返回几百个模型，按名称和 ID 做不区分大小写的子串过滤。
+  const filteredRemoteModels = useMemo(() => {
+    const keyword = modelFilter.trim().toLowerCase();
+    if (!keyword) return remoteModels;
+    return remoteModels.filter((model) => model.name.toLowerCase().includes(keyword)
+      || model.id.toLowerCase().includes(keyword));
+  }, [modelFilter, remoteModels]);
 
   if (activeCategory && activeCategory !== "models") {
     return <SettingsCategoryScreen category={activeCategory} onBack={() => setActiveCategory(null)} />;
@@ -313,15 +324,35 @@ export function SettingsScreen() {
             <View style={styles.sheetHeader}>
               <View style={styles.providerInfo}>
                 <Text style={styles.sectionTitle}>选择模型</Text>
-                <Text style={styles.providerUrl}>{remoteModels.length} 个可用模型</Text>
+                <Text style={styles.providerUrl}>
+                  {modelFilter.trim()
+                    ? `${filteredRemoteModels.length} / ${remoteModels.length} 个模型`
+                    : `${remoteModels.length} 个可用模型`}
+                </Text>
               </View>
               <Pressable accessibilityLabel="关闭模型列表" onPress={() => setModelPickerProvider(null)} style={styles.iconButton}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
               </Pressable>
             </View>
+            <View style={styles.modelFilterWrap}>
+              <Field
+                label="查找模型"
+                value={modelFilter}
+                onChangeText={setModelFilter}
+                placeholder="输入名称或模型 ID 的一部分"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
             <FlatList
-              data={remoteModels}
+              data={filteredRemoteModels}
               keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={(
+                <Text style={styles.modelFilterEmpty}>
+                  {remoteModels.length ? `没有匹配“${modelFilter.trim()}”的模型` : "还没有获取到模型列表"}
+                </Text>
+              )}
               renderItem={({ item }) => (
                 <Pressable onPress={() => chooseRemoteModel(item)} style={styles.remoteModelRow}>
                   <View style={styles.modelText}>
@@ -374,6 +405,8 @@ const styles = StyleSheet.create({
   choiceTextActive: { color: colors.primary, fontWeight: "700" },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   modelSheet: { maxHeight: "78%", paddingBottom: spacing.lg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, backgroundColor: colors.background },
+  modelFilterWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  modelFilterEmpty: { padding: spacing.lg, color: colors.textMuted, fontSize: 14, lineHeight: 20 },
   sheetHeader: { minHeight: 64, flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   remoteModelRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
 });

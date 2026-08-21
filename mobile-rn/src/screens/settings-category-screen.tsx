@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   StyleSheet,
   Switch,
@@ -55,6 +56,12 @@ import {
   type OhStoryRelease,
   type OhStoryUpdateState,
 } from "@/settings/oh-story-updater";
+import {
+  checkAppUpdate,
+  getLastAppUpdateCheck,
+  CURRENT_APP_VERSION,
+  type AppUpdateInfo,
+} from "@/settings/app-update";
 import { colors, radius, spacing } from "@/theme";
 import type { Model } from "@/types";
 
@@ -145,6 +152,21 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const [resourceState, setResourceState] = useState<RuntimeResourceState | null>(null);
   const [resourceProgress, setResourceProgress] = useState("");
   const [resourceBusy, setResourceBusy] = useState(false);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
+  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
+  const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
+
+  const checkForAppUpdate = async () => {
+    setAppUpdateBusy(true);
+    setAppUpdateError(null);
+    try {
+      setAppUpdate(await checkAppUpdate());
+    } catch (updateError) {
+      setAppUpdateError(updateError instanceof Error ? updateError.message : String(updateError));
+    } finally {
+      setAppUpdateBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,6 +188,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
         getOhStoryUpdateState(),
         getRuntimeResourceState(),
       ]);
+      setAppUpdate(await getLastAppUpdateCheck());
       setIndexSettings(nextIndex);
       setRules(nextRules);
       setSkills(nextSkills);
@@ -633,6 +656,32 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       ) : null}
       {category === "advanced" ? (
         <View style={styles.section}>
+          <Text style={styles.subsectionTitle}>应用版本</Text>
+          <SettingRow label="当前版本" value={CURRENT_APP_VERSION} />
+          <SettingRow
+            label="最新版本"
+            value={appUpdate ? `${appUpdate.latestVersion}${appUpdate.hasUpdate ? "（可更新）" : "（已是最新）"}` : "尚未检查"}
+          />
+          {appUpdate?.checkedAt ? (
+            <SettingRow label="上次检查" value={new Date(appUpdate.checkedAt).toLocaleString()} />
+          ) : null}
+          <Button
+            label={appUpdateBusy ? "检查中" : "检查应用更新"}
+            onPress={() => void checkForAppUpdate()}
+            disabled={appUpdateBusy}
+            loading={appUpdateBusy}
+          />
+          {appUpdate?.hasUpdate ? (
+            <Button
+              label={`前往下载 ${appUpdate.latestVersion}`}
+              onPress={() => void Linking.openURL(appUpdate.releaseUrl)}
+            />
+          ) : null}
+          {appUpdateError ? <Text style={styles.progressText}>{appUpdateError}</Text> : null}
+          {appUpdate?.hasUpdate && appUpdate.notes ? (
+            <Text style={styles.updateNotes} numberOfLines={12}>{appUpdate.notes}</Text>
+          ) : null}
+          <View style={styles.subsectionDivider} />
           <Text style={styles.subsectionTitle}>oh-story 内容包</Text>
           <SettingRow label="本地版本" value={ohStoryState.installed?.version ?? "未安装"} />
           <SettingRow label="最近发现" value={ohStoryState.lastCheck ? `${ohStoryState.lastCheck.version} · ${ohStoryState.lastCheck.commitSha.slice(0, 8)}` : "尚未检查"} />
@@ -695,6 +744,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   multiline: { minHeight: 120 },
   progressText: { color: colors.primary, fontSize: 13 },
+  updateNotes: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   statusText: { color: colors.textMuted, fontSize: 13 },
   modelHint: { color: colors.primary, fontSize: 12 },
   modelChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
