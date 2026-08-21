@@ -55,6 +55,14 @@ The agent activates Skills per task, calls local tools, reads the current projec
 
 Tool permissions have three levels: allow / ask every time / deny. Write-capable tools are best left on "ask".
 
+### Somewhere to keep the outline
+
+Beyond chapters, characters, and world entries there is a fourth category: outlines, plot direction, foreshadowing lists — things that **haven't happened in the text yet**. Put them in the world entries and the agent treats them as established canon.
+
+Notes attach to the book's existing structure at three levels: whole book for the overall outline, volume for that volume's arc and foreshadowing, chapter for what a specific chapter must achieve. Notes can move between levels. Deleting a chapter or volume asks whether to keep or remove its notes; keeping them promotes them one level up.
+
+The agent can read and write notes, but only note titles go into the prompt — content is fetched on demand, so a large note collection does not slow down every turn.
+
 ### Style pipeline
 
 | Concept | Source | Scope |

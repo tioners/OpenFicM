@@ -31,9 +31,12 @@ import type {
   AgentTraceEvent,
   ChatMessage,
   ModelSelection,
+  Note,
   Project,
   StyleProfile,
 } from "@/types";
+
+import { listNotes, noteScope } from "@/data/note-repositories";
 
 import { agentTools, executeAgentTool } from "./tools";
 
@@ -42,6 +45,8 @@ const MAX_DELEGATION_DEPTH = 1;
 // 主智能体与全部子智能体共享同一个请求预算，避免一条消息把中转站的 RPM 打满。
 const MAX_TOTAL_MODEL_REQUESTS = 24;
 const MAX_TRACE_STRING_LENGTH = 700;
+// 提示词里只列笔记标题，正文交给 read_note 按需加载，避免每次请求都背上全部笔记内容。
+const MAX_PROMPT_NOTE_TITLES = 40;
 const CHARACTER_CONSISTENCY_TOOL_NAMES = new Set([
   "list_characters",
   "read_character",
@@ -69,6 +74,7 @@ type RuntimeCatalog = {
   styleSelectionConfigured: boolean;
   activeStyleProfile: StyleProfile | null;
   availableStyleProfiles: StyleProfile[];
+  notes: Note[];
 };
 
 type LoopResult = {
@@ -233,6 +239,8 @@ function toolResultDetail(name: string, result: Record<string, unknown>): string
   if (name === "list_chapters") return `已读取 ${count("chapters")} 个章节`;
   if (name === "list_characters") return `已读取 ${count("characters")} 个角色`;
   if (name === "list_world_entries") return `已读取 ${count("entries")} 个世界书条目`;
+  if (name === "list_notes") return `已读取 ${count("notes")} 条笔记`;
+  if (name === "read_note") return `已读取笔记：${isRecord(result.note) ? String(result.note.title ?? "") : ""}`.trim();
   if (name === "search_chapters" || name === "search_knowledge") return `找到 ${count("results")} 条相关内容`;
   if (name === "read_chapter") return `已读取章节：${isRecord(result.chapter) ? String(result.chapter.title ?? "") : ""}`.trim();
   if (name === "read_character") return `已读取角色：${isRecord(result.character) ? String(result.character.name ?? "") : ""}`.trim();
@@ -392,6 +400,17 @@ function systemPrompt(input: {
   if (enabledRules.length) {
     sections.push(`必须遵循的规则：\n${enabledRules.map((rule) => `- ${rule.name}：${rule.content.trim()}`).join("\n")}`);
   }
+  if (input.catalog.notes.length) {
+    const scopeLabel = { project: "整书", volume: "卷", chapter: "章" } as const;
+    const listed = input.catalog.notes.slice(0, MAX_PROMPT_NOTE_TITLES);
+    const lines = listed.map((note) => `- [${scopeLabel[noteScope(note)]}] ${note.title}（id: ${note.id}）`);
+    if (input.catalog.notes.length > listed.length) {
+      lines.push(`- 另有 ${input.catalog.notes.length - listed.length} 条，调用 list_notes 查看完整列表`);
+    }
+    sections.push(`当前作品的笔记（此处只有标题，需要正文时调用 read_note）：\n${lines.join("\n")}`);
+  }
+  sections.push("大纲、剧情走向、伏笔规划这类尚未在正文中发生的内容属于笔记，用 write_note 保存，不要写进世界书；世界书只放已经成立的设定，混入未发生的计划会让后续创作把它当成既定事实。");
+
   const skills = enabledSkillsForAgent(input.catalog, input.agent);
   if (skills.length) {
     sections.push(`可按需激活的技能：\n${skills.map((skill) => `- ${skill.name}（${skill.id}）：${skill.description}`).join("\n")}`);
@@ -755,7 +774,7 @@ export async function runAgent(input: {
   onTrace?: TraceListener;
 }): Promise<AgentRunResult> {
   const consistencyKey = `agent.pendingConsistency.${input.project.id}`;
-  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, styleSelection, availableStyleProfiles] = await Promise.all([
+  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, styleSelection, availableStyleProfiles, notes] = await Promise.all([
     getAgentRules(),
     getAgentSkills(),
     getAgentDefinitions(),
@@ -766,6 +785,7 @@ export async function runAgent(input: {
     getSetting(consistencyKey),
     getActiveStyleSelection(input.project.id),
     listStyleProfiles(input.project.id),
+    listNotes(input.project.id),
   ]);
   const parsedHistoryLimit = Number(historyLimitValue);
   const catalog: RuntimeCatalog = {
@@ -780,6 +800,7 @@ export async function runAgent(input: {
     styleSelectionConfigured: styleSelection.configured,
     activeStyleProfile: styleSelection.profile,
     availableStyleProfiles,
+    notes,
   };
   const agent = activePrimaryAgent(agents, input.agentId ?? activeAgentId);
   const userRequest = latestUserRequest(input.history);

@@ -117,6 +117,14 @@ export function ProjectsScreen() {
                 <Text style={styles.quickActionText}>世界书</Text>
               </Pressable>
               <Pressable
+                disabled={!currentProjectId}
+                onPress={() => rootNavigation.navigate("Notes")}
+                style={[styles.quickAction, !currentProjectId && styles.quickActionDisabled]}
+              >
+                <Ionicons name="reader-outline" size={22} color={currentProjectId ? colors.primary : colors.textMuted} />
+                <Text style={styles.quickActionText}>笔记</Text>
+              </Pressable>
+              <Pressable
                 onPress={() => rootNavigation.navigate("StyleLibrary")}
                 style={styles.quickAction}
               >

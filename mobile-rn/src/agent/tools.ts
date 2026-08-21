@@ -28,6 +28,15 @@ import {
   setActiveStyleProfile,
 } from "@/data/style-repositories";
 import type { AgentToolDefinition } from "@/llm/types";
+import {
+  createNote,
+  deleteNote,
+  getNote,
+  listNotes,
+  moveNote,
+  noteScope,
+  updateNote,
+} from "@/data/note-repositories";
 import { searchProjectKnowledge } from "@/search/indexer";
 import { getAuthorStyleGuide, saveAuthorStyleGuide } from "@/settings/lorn-style-plugin";
 import { readStyleSourceSample } from "@/style/source-library";
@@ -284,6 +293,84 @@ export const agentTools: AgentToolDefinition[] = [
     },
   },
   {
+    name: "list_notes",
+    description: "列出当前作品的笔记标题。笔记用于存放大纲、剧情规划、伏笔清单等尚未成为正式设定的内容，按整书/卷/章三级归属",
+    parameters: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          description: "只看某一层级：project 整书、volume 卷、chapter 章；省略则返回全部",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_note",
+    description: "读取指定笔记的完整内容",
+    parameters: {
+      type: "object",
+      properties: { note_id: { type: "string", description: "笔记 ID" } },
+      required: ["note_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "write_note",
+    description: "创建笔记。大纲、剧情走向、伏笔规划这类还没发生的内容写这里，不要写进世界书，否则会被当成既定设定",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "笔记标题" },
+        content: { type: "string", description: "笔记内容" },
+        volume_id: { type: "string", description: "归属卷 ID；只写卷则为卷级笔记" },
+        chapter_id: { type: "string", description: "归属章节 ID；写了则为章级笔记，卷自动跟随该章" },
+      },
+      required: ["title", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "edit_note",
+    description: "更新笔记；调用前先读取，至少提供 title 或 content",
+    parameters: {
+      type: "object",
+      properties: {
+        note_id: { type: "string", description: "笔记 ID" },
+        title: { type: "string", description: "新标题" },
+        content: { type: "string", description: "新内容" },
+      },
+      required: ["note_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "move_note",
+    description: "改变笔记的归属层级，例如把只影响单章的备忘提升为整卷适用；都不填则移到整书级",
+    parameters: {
+      type: "object",
+      properties: {
+        note_id: { type: "string", description: "笔记 ID" },
+        volume_id: { type: "string", description: "目标卷 ID" },
+        chapter_id: { type: "string", description: "目标章节 ID" },
+      },
+      required: ["note_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "delete_note",
+    description: "删除笔记，只在用户明确要求时调用",
+    parameters: {
+      type: "object",
+      properties: { note_id: { type: "string", description: "笔记 ID" } },
+      required: ["note_id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "create_world_entry",
     description: "根据当前作品新出现或确认的设定创建世界书条目",
     parameters: {
@@ -354,6 +441,12 @@ function requiredString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== "string" || !value.trim()) throw new Error(`缺少参数 ${key}`);
   return value;
+}
+
+/** 可选字符串参数；缺失或空串统一返回 null，便于区分"没传"和"传了空值"。 */
+function optionalString(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 export async function executeAgentTool(
@@ -547,6 +640,71 @@ export async function executeAgentTool(
     if (!character || character.projectId !== projectId) throw new Error("未找到角色");
     await deleteCharacter(character.id);
     return { success: true, character_id: character.id, name: character.name };
+  }
+  if (name === "list_notes") {
+    const scope = typeof args.scope === "string" ? args.scope.trim() : "";
+    const notes = await listNotes(projectId);
+    const filtered = scope === "project" || scope === "volume" || scope === "chapter"
+      ? notes.filter((note) => noteScope(note) === scope)
+      : notes;
+    return {
+      notes: filtered.map((note) => ({
+        id: note.id,
+        title: note.title,
+        scope: noteScope(note),
+        volume_id: note.volumeId,
+        chapter_id: note.chapterId,
+        characters: note.content.length,
+        updated_at: note.updatedAt,
+      })),
+    };
+  }
+  if (name === "read_note") {
+    const note = await getNote(requiredString(args, "note_id"));
+    if (!note || note.projectId !== projectId) throw new Error("未找到笔记");
+    const content = boundedToolText(note.content);
+    return {
+      note: { ...note, content: content.text, scope: noteScope(note) },
+      content_truncated: content.truncated,
+    };
+  }
+  if (name === "write_note") {
+    const note = await createNote({
+      projectId,
+      title: requiredString(args, "title"),
+      content: requiredString(args, "content"),
+      volumeId: optionalString(args, "volume_id"),
+      chapterId: optionalString(args, "chapter_id"),
+    });
+    return { success: true, note_id: note.id, title: note.title, scope: noteScope(note) };
+  }
+  if (name === "edit_note") {
+    const existing = await getNote(requiredString(args, "note_id"));
+    if (!existing || existing.projectId !== projectId) throw new Error("未找到笔记");
+    const title = optionalString(args, "title");
+    const content = optionalString(args, "content");
+    if (title === null && content === null) throw new Error("至少提供 title 或 content");
+    const note = await updateNote({
+      id: existing.id,
+      ...(title === null ? {} : { title }),
+      ...(content === null ? {} : { content }),
+    });
+    return { success: true, note_id: note.id, title: note.title, scope: noteScope(note) };
+  }
+  if (name === "move_note") {
+    const existing = await getNote(requiredString(args, "note_id"));
+    if (!existing || existing.projectId !== projectId) throw new Error("未找到笔记");
+    const note = await moveNote(existing.id, {
+      volumeId: optionalString(args, "volume_id"),
+      chapterId: optionalString(args, "chapter_id"),
+    });
+    return { success: true, note_id: note.id, title: note.title, scope: noteScope(note) };
+  }
+  if (name === "delete_note") {
+    const existing = await getNote(requiredString(args, "note_id"));
+    if (!existing || existing.projectId !== projectId) throw new Error("未找到笔记");
+    await deleteNote(existing.id);
+    return { success: true, note_id: existing.id, title: existing.title };
   }
   if (name === "create_world_entry") {
     const worldInfo = await getOrCreateWorldInfo(projectId);

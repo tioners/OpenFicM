@@ -25,6 +25,21 @@ export interface Chapter {
   updatedAt: string;
 }
 
+/** 笔记的归属层级：两个外键都为空是整书，只有卷是卷级，有章是章级。 */
+export type NoteScope = "project" | "volume" | "chapter";
+
+export interface Note {
+  id: string;
+  projectId: string;
+  volumeId: string | null;
+  chapterId: string | null;
+  title: string;
+  content: string;
+  orderIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type StyleSourceFormat = "txt" | "markdown" | "epub";
 
 export interface StyleSource {

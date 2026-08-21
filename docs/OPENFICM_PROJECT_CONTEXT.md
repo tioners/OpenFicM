@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.7.7
+当前正式版本：0.8.0
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.7.7
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.8.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.7.7 发布提交，以 v0.7.7 标签为准
-- 本轮审查基线：8f884b6 fix(llm): surface output truncation instead of reporting empty content
-- Release 标签：v0.7.7
+- 最新源码提交：本次 0.8.0 发布提交，以 v0.8.0 标签为准
+- 本轮审查基线：e1cc15f fix(ui): stop sheet backdrop from stealing scroll from inner ScrollView
+- Release 标签：v0.8.0
 - Android applicationId：com.openfic.mobile
-- versionCode：14
-- versionName：0.7.7
+- versionCode：15
+- versionName：0.8.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.7.7.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.8.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.7.7 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版修复用户实测发现的三个问题：文风蒸馏汇总步骤被输出截断误报成"内容为空"、换模型后重试仍打旧模型、文风指南预览滚不动；并新增蒸馏模型显示、模型列表搜索和应用更新检查。0.7.7 把所有底部弹层的遮罩收敛到 `SheetBackdrop`，修掉 responder 抢占导致的滚动时灵时不灵，详见 docs/releases/v0.7.7.md。0.7.6 的截断误判修复见 docs/releases/v0.7.6.md，0.7.5 的多轮继续蒸馏见 docs/releases/v0.7.5.md。
+0.8.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版新增按整书/卷/章三级归属的笔记，用于存放大纲、剧情规划和伏笔这类尚未在正文中发生的内容，详见 docs/releases/v0.8.0.md。近几个版本的修复：0.7.7 弹层滚动被 responder 抢占（v0.7.7.md）、0.7.6 输出截断误报成内容为空与换模型后重试仍打旧模型（v0.7.6.md）、0.7.5 多轮继续蒸馏（v0.7.5.md）、0.7.4 429 限流与强制委派（v0.7.4.md）。
 
 ## 3. 功能清单
 
@@ -86,7 +86,7 @@ GitHub 仓库：
 - 参考文风与作品无关，可跨作品选择；作者文风按作品隔离，并保存递增版本。
 - 助手页和写作页都可选择创作文风；文风会注入主智能体和正文类子智能体。
 - `write_chapter`/`edit_chapter` 保存 AI 原稿和所用文风；作者实际修改并保存后，可在预览页进化当前作品的作者文风。
-- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.7.7 发布亮点见 `docs/releases/v0.7.7.md`。
+- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.8.0 发布亮点见 `docs/releases/v0.8.0.md`。
 
 ### 本地检索
 
@@ -113,6 +113,8 @@ GitHub 仓库：
 - src/data/database.ts：Expo SQLite 初始化、迁移和事务。
 - src/data/repositories.ts：作品、卷、章节、角色、世界书、会话、消息、模型和设置仓储。
 - src/data/style-repositories.ts、chapter-draft-repositories.ts：参考书/文风版本和 AI 原稿快照仓储。
+- src/data/note-repositories.ts：笔记仓储。`volume_id`/`chapter_id` 都为空是整书笔记，只有卷是卷级，有章是章级；`resolveTarget` 会从章反查所属卷，避免归属不一致。
+- src/screens/notes-screen.tsx：按整书/各卷/各章分组的笔记页，支持在任意层级新建与跨级移动。
 - src/lib/export.ts：Markdown 导出；文件名清理、范围筛选、缓存文件和系统分享。
 - src/search：本地全文、嵌入和重排索引。
 - src/settings：默认设置、运行时 Agent/Skill 资源安装、Lorn 文风插件和 oh-story 内容更新。
@@ -179,7 +181,7 @@ $env:OPENFICM_RELEASE_KEY_PASSWORD = $password
 powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 ~~~
 
-脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.7.7.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
+脚本会先删除仓库内受路径校验保护的 android/app/build 生成目录，避免增量构建复用旧资源；生成 APK 后还会拒绝任何 .gguf 条目。成功时在仓库根目录生成 OpenFicM-Android-0.8.0.apk 并打印 SHA-256。没有四个 OPENFICM_RELEASE_* 变量时，app/build.gradle 会拒绝 assembleRelease；这是防止误用调试证书发布的有意保护。没有正式密钥时只运行 npm run android:apk:debug，并明确标为本地测试包。
 
 ### 已完成的校验
 
@@ -188,11 +190,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - Gradle assembleRelease：BUILD SUCCESSFUL。
 - Release 脚本正式签名：成功。脚本末尾的 Get-FileHash 在从 Git Bash 嵌套调用 PowerShell 时会因 PSModulePath 丢失而报 CommandNotFoundException；APK 本身已生成并签名，改用 sha256sum 或在原生 PowerShell 会话中重跑即可。
 - apksigner verify --verbose：Verifies，v2 签名方案通过，正式证书为 c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863。
-- aapt2：package com.openfic.mobile，versionCode 12，versionName 0.7.5，minSdk 28，targetSdk 36。
+- aapt2：package com.openfic.mobile，versionCode 15，versionName 0.8.0，minSdk 28，targetSdk 36。
 - APK ZIP：1220 个条目，内置 index.android.bundle，仅 arm64-v8a；不含 GGUF、OpenFicM/Lorn catalog 或 Agent/Skill 目录。
-- APK 大小：132,501,360 字节（126.36 MiB）。
-- APK SHA-256：60A2FF78E7B106AFFA7EA2E6E331A1BC105569FFD4DC876BF0E9BE79C10DAD6B。
-- 真机验证（红米 25102RKBEC，从 0.7.5 覆盖升级）：安装成功、数据保留、启动无 FATAL。
+- APK 大小：132,543,620 字节（126.40 MiB）。
+- APK SHA-256：CD7BE582655CC6A9D732BA0B186228A7EFF3513771AABF135AF9F5CC666A7486。
+- 真机验证（红米 25102RKBEC，从 0.7.7 覆盖升级）：安装成功、数据保留、启动无 FATAL；笔记页三级分组正确渲染，整书级新建成功，跨级移动（整书 → 章）成功且分组即时更新。
 - 真机验证（0.7.6 新功能）：高级设置的应用版本检查跑通，查到远端 v0.7.5、本机 0.7.6，正确显示"已是最新"而不是误报可更新；模型列表"查找模型"过滤正常（输入 grok 从 5 个筛到 2 个，计数显示 2/5）；参考书详情页正确显示当前默认模型名。
 - 真机验证（蒸馏链路）：用《斗破苍穹》（540 万字）跑通 4/4 批次分析，断点带窗口正确续跑未重头开始，批次标签显示真实章号。汇总步骤仍未跑通，但失败模式已从误报的"模型返回的文风指南不能为空"变成 HTTP 层的准确报错，说明截断误判确实被修掉了。
 - 未完成的真机验证：一次完整成功的蒸馏（含汇总落库和"继续蒸馏"轮次推进）。两套中转都在汇总这一步失败：公益中转 429 限流，openrouter 的 stealth/ox-alpha 返回 HTTP 200 + 非 JSON 响应体。都是服务端行为，不是应用缺陷；0.7.6 新增的响应体片段回显可以在下次复现时直接看到中转返回了什么。
@@ -213,16 +215,17 @@ git push origin main
 正式 Release 使用 GitHub CLI：
 
 ~~~powershell
-gh release create v0.7.7 .\OpenFicM-Android-0.7.7.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.7.7" --notes-file docs/releases/v0.7.7.md --latest
+gh release create v0.8.0 .\OpenFicM-Android-0.8.0.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.8.0" --notes-file docs/releases/v0.8.0.md --latest
 ~~~
 
-不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.7.7 和 gh release list 验证标签及资产。
+不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.8.0 和 gh release list 验证标签及资产。
 
 ## 8. 已知限制和后续重点
 
-- 0.7.5 的一整轮蒸馏尚未在真机上跑通，卡在用户的公益中转站限流。已定位为请求体量问题而非中转站故障：同一中转、同一模型、同一时刻，助手的小请求成功返回，而蒸馏的第一个批次请求立刻收到 `{"code":429,"type":"upstream_error"}`。
-- 蒸馏单次请求约 20,600 字符：system 侧的 Lorn 方法论占 12,000（`STYLE_MODEL_INSTRUCTION_CHARACTERS`），user 侧样本占 8,400（`ANALYSIS_BATCH_SIZE` 6 × `ANALYSIS_PASSAGE_CHARACTERS` 1,400）。中文约合 15K-20K tokens，是普通聊天请求的 5-7 倍，容易触发按 TPM 计费的中转站限流。
-- 方法论正文在一轮 4 个批次里被重复发送 4 次，累计约 48,000 字符。若要降低单请求体量，可调 `STYLE_MODEL_INSTRUCTION_CHARACTERS` 或 `ANALYSIS_BATCH_SIZE`，但两者分别影响方法论保真度和每轮请求次数，属于需要用户拍板的取舍，本轮未擅自修改。
+- 文风蒸馏已由用户在真机跑通完整一轮：薄荷中转 + grok-4.6，《斗破苍穹》（540 万字，识别出 1646 章），生成参考文风 V1，界面正确切到"继续蒸馏"并显示"覆盖到第 24/1646 章"。
+- 蒸馏对供应商的要求偏高，换中转/模型时容易踩坑。单次请求约 20,600 字符：Lorn 方法论占 12,000（`STYLE_MODEL_INSTRUCTION_CHARACTERS`），样本占 8,400（`ANALYSIS_BATCH_SIZE` 6 × `ANALYSIS_PASSAGE_CHARACTERS` 1,400），中文约合 15K-20K tokens，是普通聊天请求的 5-7 倍，按 TPM 计费的中转容易限流。已实测：公益中转小请求成功、蒸馏请求立刻 429；openrouter 的 stealth/ox-alpha 在汇总步骤返回 HTTP 200 + 非 JSON 响应体。
+- 方法论正文在一轮 4 个批次里被重复发送 4 次，累计约 48,000 字符。若要降低单请求体量，可调 `STYLE_MODEL_INSTRUCTION_CHARACTERS` 或 `ANALYSIS_BATCH_SIZE`，但两者分别影响方法论保真度和每轮请求次数，属于需要用户拍板的取舍，尚未修改。
+- 上下文窗口与蒸馏问题无关，不要混淆：429 是 TPM 限流（每分钟吞吐），截断是输出 token 上限，两者都不随上下文窗口变大而缓解。应用侧没有上下文窗口设置，只有 `context.historyLimit`（消息条数）和 `MAX_TOOL_TEXT_CHARACTERS`（工具返回字符数）。1M 上下文唯一的用武之地是加大每批样本数，但那会让单请求更大，在限流严的中转上适得其反。
 - 0.7.4 的 APK 仅在助手侧做过真机验证，复杂创作任务是否仍触发 429、一致性检查状态是否如实显示，仍需在真我 GT7 和红米 K90 PRO MAX 上实测，同时观察长期创作、升级、分享导出和本地模型内存表现。
 - 24 次模型请求预算是按主智能体 12 轮加一层子智能体 12 轮估算的上限。如果实测中正常任务频繁撞上限，应先确认是不是模型陷入了工具调用循环，再考虑调整 MAX_TOTAL_MODEL_REQUESTS，不要直接放大预算。
 - CPU-only 是当前环境的构建结果；旗舰手机性能足够，但首次加载 GGUF 仍可能需要时间和较多内存。

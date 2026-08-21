@@ -17,6 +17,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import { exportNovel, type ExportScope } from "@/lib/export";
+import { countNotesUnder, deleteNotesUnder } from "@/data/note-repositories";
 import {
   createChapter,
   createVolume,
@@ -346,7 +347,7 @@ export function WritingScreen() {
     }
   };
 
-  const removeChapter = async (chapter: Chapter) => {
+  const removeChapter = async (chapter: Chapter, removeNotes: boolean) => {
     if (savingRef.current) {
       setError("章节正在保存，请稍后再删除");
       return;
@@ -354,6 +355,8 @@ export function WritingScreen() {
     if (chapter.id === activeChapter?.id && !await persistDraft(false)) return;
     setError(null);
     try {
+      // 先删笔记再删章节；不删的话外键 SET NULL 会让这些笔记上浮到卷级。
+      if (removeNotes) await deleteNotesUnder({ chapterId: chapter.id });
       await deleteChapter(chapter.id);
       const nextChapters = chapters.filter((item) => item.id !== chapter.id);
       setChapters(nextChapters);
@@ -368,16 +371,29 @@ export function WritingScreen() {
     }
   };
 
-  const confirmDeleteChapter = (chapter: Chapter) => {
+  const confirmDeleteChapter = async (chapter: Chapter) => {
     setDirectoryTarget(null);
     setChapterPickerVisible(false);
-    Alert.alert("删除章节", "确定删除《" + chapter.title + "》？正文和本地索引会一并删除。", [
-      { text: "取消", style: "cancel" },
-      { text: "删除", style: "destructive", onPress: () => { void removeChapter(chapter); } },
-    ]);
+    const noteCount = await countNotesUnder({ chapterId: chapter.id }).catch(() => 0);
+    if (!noteCount) {
+      Alert.alert("删除章节", "确定删除《" + chapter.title + "》？正文和本地索引会一并删除。", [
+        { text: "取消", style: "cancel" },
+        { text: "删除", style: "destructive", onPress: () => { void removeChapter(chapter, false); } },
+      ]);
+      return;
+    }
+    Alert.alert(
+      "删除章节",
+      "《" + chapter.title + "》有 " + noteCount + " 条笔记。正文和本地索引会一并删除，笔记怎么处理？",
+      [
+        { text: "取消", style: "cancel" },
+        { text: "保留笔记", onPress: () => { void removeChapter(chapter, false); } },
+        { text: "一并删除", style: "destructive", onPress: () => { void removeChapter(chapter, true); } },
+      ],
+    );
   };
 
-  const removeVolume = async (volume: Volume) => {
+  const removeVolume = async (volume: Volume, removeNotes: boolean) => {
     if (savingRef.current) {
       setError("章节正在保存，请稍后再删除");
       return;
@@ -386,6 +402,7 @@ export function WritingScreen() {
     if (removesActiveChapter && !await persistDraft(false)) return;
     setError(null);
     try {
+      if (removeNotes) await deleteNotesUnder({ volumeId: volume.id });
       await deleteVolume(volume.id);
       const nextVolumes = volumes.filter((item) => item.id !== volume.id);
       const nextChapters = chapters.filter((chapter) => chapter.volumeId !== volume.id);
@@ -413,10 +430,24 @@ export function WritingScreen() {
     const detail = chapterCount
       ? "其中 " + chapterCount + " 章正文和本地索引会一并删除。"
       : "该卷目前没有章节。";
-    Alert.alert("删除卷", "确定删除《" + volume.title + "》？" + detail, [
-      { text: "取消", style: "cancel" },
-      { text: "删除", style: "destructive", onPress: () => { void removeVolume(volume); } },
-    ]);
+    void countNotesUnder({ volumeId: volume.id }).catch(() => 0).then((noteCount) => {
+      if (!noteCount) {
+        Alert.alert("删除卷", "确定删除《" + volume.title + "》？" + detail, [
+          { text: "取消", style: "cancel" },
+          { text: "删除", style: "destructive", onPress: () => { void removeVolume(volume, false); } },
+        ]);
+        return;
+      }
+      Alert.alert(
+        "删除卷",
+        "《" + volume.title + "》及其章节共有 " + noteCount + " 条笔记。" + detail + "笔记怎么处理？",
+        [
+          { text: "取消", style: "cancel" },
+          { text: "保留笔记", onPress: () => { void removeVolume(volume, false); } },
+          { text: "一并删除", style: "destructive", onPress: () => { void removeVolume(volume, true); } },
+        ],
+      );
+    });
   };
 
   const openNewChapter = () => {
@@ -808,7 +839,7 @@ export function WritingScreen() {
             <Pressable
               onPress={() => {
                 if (directoryTarget?.kind === "volume") confirmDeleteVolume(directoryTarget.volume);
-                else if (directoryTarget?.kind === "chapter") confirmDeleteChapter(directoryTarget.chapter);
+                else if (directoryTarget?.kind === "chapter") void confirmDeleteChapter(directoryTarget.chapter);
               }}
               style={styles.actionRow}
             >

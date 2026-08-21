@@ -10,4 +10,5 @@ export type RootStackParamList = {
   Characters: undefined;
   WorldInfo: undefined;
   StyleLibrary: undefined;
+  Notes: undefined;
 };

@@ -232,10 +232,30 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
       UNIQUE(source_id, chunk_index)
     );
 
+    /*
+     * 笔记按作品/卷/章三级归属：两个外键都为空是整书笔记，只有 volume_id 是卷笔记，
+     * 有 chapter_id 是章笔记。外键用 SET NULL 而不是 CASCADE，
+     * 这样删除章节或卷时笔记会自动上浮到上一级而不是消失；
+     * 用户在删除确认框里选择"一并删除"时，由调用方先显式删除笔记。
+     */
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      volume_id TEXT REFERENCES volumes(id) ON DELETE SET NULL,
+      chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      order_index INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_volumes_project_order
       ON volumes(project_id, order_index);
     CREATE INDEX IF NOT EXISTS idx_chapters_volume_order
       ON chapters(volume_id, order_index);
+    CREATE INDEX IF NOT EXISTS idx_notes_project_scope
+      ON notes(project_id, volume_id, chapter_id, order_index);
     CREATE INDEX IF NOT EXISTS idx_style_sources_updated
       ON style_sources(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_style_profiles_scope_updated
