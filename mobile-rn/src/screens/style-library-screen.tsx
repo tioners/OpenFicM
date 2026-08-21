@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 
-import { Button, EmptyState, ErrorNotice, Field, Header, Screen } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
   createStyleProfileVersion,
   deleteStyleProfile,
@@ -387,8 +387,8 @@ export function StyleLibraryScreen() {
       />
 
       <Modal visible={Boolean(selectedSource)} transparent animationType="slide" onRequestClose={closeSource}>
-        <Pressable style={styles.modalBackdrop} onPress={closeSource}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={closeSource}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 {editingSource ? (
@@ -472,12 +472,12 @@ export function StyleLibraryScreen() {
               )) : <Text style={styles.emptyHint}>还没有版本，点击“蒸馏文风”生成。</Text>}
             </ScrollView>
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
 
       <Modal visible={Boolean(selectedProfile)} transparent animationType="slide" onRequestClose={() => setSelectedProfile(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setSelectedProfile(null)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setSelectedProfile(null)}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 <Text style={styles.sheetTitle} numberOfLines={2}>{selectedProfile?.name} V{selectedProfile?.version}</Text>
@@ -517,7 +517,7 @@ export function StyleLibraryScreen() {
               </View>
             </ScrollView>
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
     </Screen>
   );
@@ -586,7 +586,6 @@ const styles = StyleSheet.create({
   useButton: { minWidth: 54, minHeight: 44, alignItems: "center", justifyContent: "center", marginRight: spacing.xs },
   useButtonText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   useButtonTextActive: { color: colors.textMuted },
-  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   sheet: { maxHeight: "88%", borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, backgroundColor: colors.background },
   // 父层只有 maxHeight，ScrollView 默认不收缩会把超出部分顶出可视区且滚不动，必须允许它收缩。
   sheetScroll: { flexShrink: 1 },

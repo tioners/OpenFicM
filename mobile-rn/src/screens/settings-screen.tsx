@@ -5,7 +5,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Button, ErrorNotice, Field, Header, Screen } from "@/components/ui";
+import { Button, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
   deleteProvider,
   getProviderApiKey,
@@ -319,8 +319,8 @@ export function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setModelPickerProvider(null)}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setModelPickerProvider(null)}>
-          <View style={styles.modelSheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setModelPickerProvider(null)}>
+          <View style={styles.modelSheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.providerInfo}>
                 <Text style={styles.sectionTitle}>选择模型</Text>
@@ -364,7 +364,7 @@ export function SettingsScreen() {
               )}
             />
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
     </Screen>
   );
@@ -403,7 +403,6 @@ const styles = StyleSheet.create({
   choiceActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
   choiceText: { color: colors.textMuted, fontSize: 13 },
   choiceTextActive: { color: colors.primary, fontWeight: "700" },
-  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   modelSheet: { maxHeight: "78%", paddingBottom: spacing.lg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, backgroundColor: colors.background },
   modelFilterWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   modelFilterEmpty: { padding: spacing.lg, color: colors.textMuted, fontSize: 14, lineHeight: 20 },

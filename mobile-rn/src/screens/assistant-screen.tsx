@@ -18,7 +18,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { AgentRunError, runAgent } from "@/agent/runtime";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
 import { MessageActionBar } from "@/components/message-action-bar";
-import { Button, EmptyState, ErrorNotice, Header, Screen } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
   addMessage,
   createChatSession,
@@ -767,8 +767,8 @@ export function AssistantScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={sessionPickerVisible} transparent animationType="slide" onRequestClose={() => setSessionPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setSessionPickerVisible(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setSessionPickerVisible(false)}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 <Text style={styles.sheetTitle} numberOfLines={1}>{project?.title ?? "当前作品"}</Text>
@@ -804,12 +804,12 @@ export function AssistantScreen() {
               }}
             />
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
 
       <Modal visible={modelPickerVisible} transparent animationType="slide" onRequestClose={() => setModelPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setModelPickerVisible(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setModelPickerVisible(false)}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 <Text style={styles.sheetTitle}>选择模型</Text>
@@ -847,11 +847,11 @@ export function AssistantScreen() {
               }}
             />
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
       <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setStylePickerVisible(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setStylePickerVisible(false)}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 <Text style={styles.sheetTitle}>选择创作文风</Text>
@@ -888,7 +888,7 @@ export function AssistantScreen() {
               }}
             />
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
       <AgentQuestionSheet
         request={pendingQuestion}
@@ -980,7 +980,6 @@ const styles = StyleSheet.create({
   composerInput: { flex: 1, maxHeight: 130, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: 11, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, color: colors.text, fontSize: 16 },
   sendButton: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
   sendDisabled: { opacity: 0.48 },
-  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   sheet: {
     maxHeight: "80%",
     paddingBottom: spacing.xl,

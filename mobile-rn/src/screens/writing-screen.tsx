@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import { Button, EmptyState, ErrorNotice, Field, Header, Screen } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import { exportNovel, type ExportScope } from "@/lib/export";
 import {
   createChapter,
@@ -614,8 +614,8 @@ export function WritingScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setStylePickerVisible(false)}>
-          <View style={styles.actionSheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setStylePickerVisible(false)}>
+          <View style={styles.actionSheet}>
             <View style={styles.exportHeader}>
               <View>
                 <Text style={styles.sheetTitle}>选择创作文风</Text>
@@ -647,12 +647,12 @@ export function WritingScreen() {
               })}
             </ScrollView>
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
 
       <Modal visible={chapterPickerVisible} transparent animationType="slide" onRequestClose={() => setChapterPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setChapterPickerVisible(false)}>
-          <View style={styles.directorySheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setChapterPickerVisible(false)}>
+          <View style={styles.directorySheet}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>作品目录</Text>
               <View style={styles.sheetHeaderActions}>
@@ -733,12 +733,12 @@ export function WritingScreen() {
               )}
             />
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
 
       <Modal visible={exportPickerVisible} transparent animationType="fade" onRequestClose={() => setExportPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setExportPickerVisible(false)}>
-          <View style={styles.actionSheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setExportPickerVisible(false)}>
+          <View style={styles.actionSheet}>
             <View style={styles.exportHeader}>
               <Text style={styles.actionTitle}>导出作品</Text>
               <Pressable accessibilityLabel="关闭导出选项" onPress={() => setExportPickerVisible(false)} style={styles.iconButton}>
@@ -770,11 +770,11 @@ export function WritingScreen() {
               <Ionicons name="chevron-forward" size={19} color={colors.textMuted} />
             </Pressable>
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
       <Modal visible={Boolean(directoryTarget)} transparent animationType="fade" onRequestClose={() => setDirectoryTarget(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setDirectoryTarget(null)}>
-          <View style={styles.actionSheet} onStartShouldSetResponder={() => true}>
+        <SheetBackdrop onPress={() => setDirectoryTarget(null)}>
+          <View style={styles.actionSheet}>
             <Text numberOfLines={2} style={styles.actionTitle}>
               {directoryTarget?.kind === "volume" ? directoryTarget.volume.title : directoryTarget?.chapter.title}
             </Text>
@@ -816,7 +816,7 @@ export function WritingScreen() {
               <Text style={styles.actionTextDanger}>{directoryTarget?.kind === "volume" ? "删除卷" : "删除章节"}</Text>
             </Pressable>
           </View>
-        </Pressable>
+        </SheetBackdrop>
       </Modal>
 
       <Modal visible={Boolean(nameDialog)} transparent animationType="fade" onRequestClose={() => setNameDialog(null)}>
@@ -881,7 +881,6 @@ const styles = StyleSheet.create({
   editorFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.md },
   previewActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: spacing.sm },
   counter: { flex: 1, color: colors.textMuted, fontSize: 12 },
-  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   centeredBackdrop: { flex: 1, justifyContent: "center", padding: spacing.lg, backgroundColor: colors.overlay },
   directorySheet: {
     maxHeight: "82%",

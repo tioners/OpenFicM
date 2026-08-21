@@ -110,7 +110,25 @@ export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: (
   );
 }
 
+/**
+ * 底部弹层的遮罩。遮罩是铺满全屏的兄弟节点并排在内容之前，内容自然盖在它上面，
+ * 因此点击内容不会命中遮罩，点击内容之外才会关闭。
+ *
+ * 不要退回"用 Pressable 包住整个弹层、再给内容加 onStartShouldSetResponder"的写法：
+ * 那样会在触摸开始时抢走 JS responder，慢速拖动就会挡住内部 ScrollView 的滚动，
+ * 表现为滚动时灵时不灵。
+ */
+export function SheetBackdrop({ onPress, children }: PropsWithChildren<{ onPress: () => void }>) {
+  return (
+    <View style={styles.sheetBackdrop}>
+      <Pressable accessibilityLabel="关闭弹层" style={StyleSheet.absoluteFill} onPress={onPress} />
+      {children}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  sheetBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   screen: { flex: 1, backgroundColor: colors.background },
   scroll: { paddingBottom: 40 },
   header: {

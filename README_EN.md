@@ -1,41 +1,95 @@
+<div align="center">
+
 # OpenFicM
 
-OpenFicM is an independent Android adaptation of OpenFic. It uses React Native, Expo SQLite, and an on-device Agent runtime. The installed APK does not require a PC, FastAPI, Socket.IO, or Metro. Network access is used for the first-run runtime resource download, user-configured model APIs, provider model discovery, and manually requested content updates.
+**A local-first Android app for writing fiction on your phone**
 
-This is an independently maintained derivative project, not an official OpenFic Android client.
+[![Release](https://img.shields.io/github/v/release/tioners/OpenFicM?label=release&color=2e7d5b)](https://github.com/tioners/OpenFicM/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/tioners/OpenFicM/total?color=2e7d5b)](https://github.com/tioners/OpenFicM/releases)
+[![Android](https://img.shields.io/badge/Android-9.0%2B-3ddc84?logo=android&logoColor=white)](https://github.com/tioners/OpenFicM/releases/latest)
+[![ABI](https://img.shields.io/badge/ABI-arm64--v8a-blue)](https://github.com/tioners/OpenFicM/releases/latest)
+[![License](https://img.shields.io/badge/License-Apache--2.0-lightgrey)](LICENSE)
+
+[Download](#download) · [User guide (Chinese)](docs/USER_GUIDE.md) · [Changelog](docs/releases) · [Build from source](#build-from-source)
+
+[简体中文](README.md)
+
+</div>
+
+---
+
+OpenFicM is an independent Android adaptation of [OpenFic](https://github.com/syrizelink/OpenFic), built with React Native, Expo SQLite, and an **on-device Agent runtime**. The installed APK needs no PC, FastAPI, Socket.IO, or Metro.
+
+> This is an independently maintained derivative project, not an official OpenFic Android client. The interface and documentation are in Simplified Chinese.
+
+## What it solves
+
+Most mobile AI writing tools are chat wrappers: they generate text, but you have to keep track of your own characters, relationships, and world rules — and paste them back into the prompt yourself.
+
+OpenFicM ports the desktop Agent system to the phone. The agent reads your chapters, characters, and world entries, writes back to them under permissions you control, and can delegate to sub-agents. Your work stays on the device; the network is used only when you actually call a model.
 
 ## Download
 
-Download the APK from [GitHub Releases](https://github.com/tioners/OpenFicM/releases).
+Get the APK from [Releases](https://github.com/tioners/OpenFicM/releases/latest). Install over the previous version — do not uninstall first, that wipes local data.
 
-- Current version: 0.7.0
-- Android 9.0 or newer
-- arm64-v8a only
-- Official APK certificate SHA-256: c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
+| | |
+| --- | --- |
+| Requires | Android 9.0 or newer |
+| ABI | arm64-v8a only |
+| APK size | ~126 MB |
+| Signing certificate SHA-256 | `c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863` |
 
-## Highlights
+Download only from this project's Releases. A signature conflict means the installed package uses a different certificate.
 
-- Local bookshelf with volume and chapter creation, rename, and deletion
-- Markdown export for the current chapter, current volume, or full novel
-- Preview-first chapter reading with explicit editing, auto-save, and keyboard avoidance
-- Project-scoped assistant sessions, model selection, chat history, failed-request retry, and message editing
-- Local characters, world book, full-text search, embeddings, and reranking
-- Custom OpenAI-compatible, Google Gemini, and Anthropic providers
-- Provider model discovery
-- Rules, skills, agents, tool permissions, context, indexing, and advanced settings
-- Verified first-run downloads for OpenFicM Agent/Skill content, oh-story content, Lorn style skills, and local retrieval models
-- Character and world-book consistency checks after chapter changes
-- Gemini functionDeclaration schema compatibility fix
-- Lorn style distillation and evolution with a per-project author style guide
-- JSON and Markdown exports for individual or all character and world-book entries
-- Persistent assistant retry, copy, regenerate, editable history, and expandable error details
+## Quick start
 
-API keys are stored with Android SecureStore rather than SQLite. Project content remains on the device unless it is sent to a model provider selected by the user.
-HTTP Base URLs are allowed for local custom providers; use HTTPS whenever the provider is reachable across a network.
+1. **First launch** — tap the one-tap fetch button to download and verify Agents/Skills and the local retrieval models (~225 MB, from GitHub and Hugging Face).
+2. **Configure a model** — Settings → Models & Providers. Enter a Base URL and API Key, fetch the model list, then set a default model. OpenAI-compatible, Google Gemini, and Anthropic protocols are supported.
+3. **Start writing** — create a project on the shelf, then describe your task in the assistant.
 
-## Build
+## Core capabilities
 
-Node.js 22, Java 17, Android SDK, and PowerShell are required.
+### A real agent, not a chat box
+
+The agent activates Skills per task, calls local tools, reads the current project's data, delegates to sub-agents, and updates chapters, characters, and world entries under the permissions you set. A live trace shows every tool call and result.
+
+Tool permissions have three levels: allow / ask every time / deny. Write-capable tools are best left on "ask".
+
+### Style pipeline
+
+| Concept | Source | Scope |
+| --- | --- | --- |
+| Reference book | TXT / Markdown / EPUB you import | Global library |
+| Reference style | Constraints distilled from a reference book | Across projects |
+| Author style | Learned from the diff between AI draft and your final edit | Current project only |
+
+Reference-style distillation runs in **repeatable rounds**: each round reads 24 consecutive chapters, and tapping again advances forward through the book, merging new evidence into the existing guide rather than starting over. The full novel is never uploaded — only the current window's samples.
+
+Author style works the other way: the agent writes a chapter, you edit it your way, and the model compares the two versions to extract your personal voice.
+
+### Local first
+
+Projects, chapters, characters, world entries, chat history, style versions, and the search index all live in the app's private directory. API keys are stored in Android SecureStore, never in SQLite. Chinese embedding and reranking models run on the phone's CPU, so semantic search needs no external vector database.
+
+Only when you initiate a model request does the app send the context needed for that task to the provider you configured.
+
+### Mobile-shaped editing
+
+Chapters open in preview mode to avoid mis-taps; tap edit to type. Autosave, background save, and keyboard avoidance are built in. Export a chapter, a volume, or the whole novel as Markdown through the Android share sheet.
+
+The assistant supports multiple sessions, per-session model selection, editing past messages to re-run, and persistent retry with expandable raw error details.
+
+## Security and privacy boundaries
+
+- API keys live in Android SecureStore, not in plaintext SQLite.
+- The APK ships no GGUF models, Agents/Skills, or catalogs; they are fetched on first launch from pinned sources and verified by size and SHA-256.
+- Remote content is read from an allowlist of Markdown files pinned to immutable commits. Remote hooks, scripts, and Git configuration are never executed.
+- HTTP Base URLs are allowed so self-hosted providers work; prefer HTTPS across networks.
+- Uninstalling deletes local data. There is no cloud sync.
+
+## Build from source
+
+Requires Node.js 22, Java 17, the Android SDK, and PowerShell.
 
 ~~~powershell
 cd mobile-rn
@@ -44,18 +98,39 @@ npm run type-check
 powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ~~~
 
-The APK does not bundle GGUF models or Agent/Skill catalogs. On first launch, the user explicitly downloads them to the app-private directory; temporary model files are checked for exact size and SHA-256 before installation. GGUF files, APKs, signing keys, and local.properties are excluded from Git.
+For local testing use `npm run android:apk:debug`, which produces a `standalone` APK with bundled JS and a debug certificate. **Never publish that build.**
 
-The release script clears `android/app/build` before assembling and rejects any APK containing a GGUF entry, preventing stale incremental assets from being published.
+<details>
+<summary>Release signing and key rotation</summary>
 
-Release builds require all four `OPENFICM_RELEASE_STORE_FILE`, `OPENFICM_RELEASE_STORE_PASSWORD`, `OPENFICM_RELEASE_KEY_ALIAS`, and `OPENFICM_RELEASE_KEY_PASSWORD` variables. Use `npm run android:apk:debug` for local development. The official OpenFicM signing key is not published.
+Release builds require four environment variables: `OPENFICM_RELEASE_STORE_FILE`, `OPENFICM_RELEASE_STORE_PASSWORD`, `OPENFICM_RELEASE_KEY_ALIAS`, `OPENFICM_RELEASE_KEY_PASSWORD`. Without all four, `app/build.gradle` refuses `assembleRelease` — a deliberate guard against shipping a debug-signed build.
+
+The build script clears the generated `android/app/build` directory first and rejects any GGUF entry before copying artifacts, so stale incremental resources cannot re-enter the APK.
+
+Key rotation additionally requires the previous signer's `OPENFICM_RELEASE_LEGACY_STORE_FILE`, `OPENFICM_RELEASE_LEGACY_STORE_PASSWORD`, `OPENFICM_RELEASE_LEGACY_KEY_ALIAS`, and `OPENFICM_RELEASE_LEGACY_KEY_PASSWORD` alongside `OPENFICM_RELEASE_LINEAGE_FILE`. Unset the lineage variable when no legacy signer is configured.
+
+GGUF files, APKs, signing material, and local.properties stay out of Git. Pinned sources and hashes are in `mobile-rn/src/settings/remote-resources.ts`.
+
+Output: `OpenFicM-Android-<version>.apk`
+
+</details>
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `mobile-rn` | The OpenFicM Android app |
+| `docs` | User guide, release notes, project handover record |
+| `backend`, `frontend`, `desktop` | Retained OpenFic upstream sources and compatibility fixes |
+| `THIRD_PARTY_NOTICES.md` | Third-party project, content, and model notices |
 
 ## Credits
 
-- [syrizelink/OpenFic](https://github.com/syrizelink/OpenFic), the upstream project and Agent architecture, Apache-2.0
-- [worldwonderer/oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode), writing skills and delegated-agent content, MIT
-- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) and [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base), local retrieval models
+- [syrizelink/OpenFic](https://github.com/syrizelink/OpenFic) — original project, product design, and desktop Agent system, Apache-2.0
+- [worldwonderer/oh-story-claudecode](https://github.com/worldwonderer/oh-story-claudecode) — writing Skills and sub-agent content, MIT
+- [lornshrimp/Lorn.NovelWriteSkills](https://github.com/lornshrimp/Lorn.NovelWriteSkills) — reference-style distillation method and allowlisted material; the pinned upstream commit declares no license at the repository root, see the third-party notices
+- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) and [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base) — local retrieval models
 
 ## License
 
-OpenFicM code is released under Apache License 2.0. Third-party materials remain under their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Project code is released under the [Apache License 2.0](LICENSE). Third-party content remains under its own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
