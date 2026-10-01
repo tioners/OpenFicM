@@ -366,6 +366,83 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
 
     UPDATE style_profiles SET version = 1 WHERE kind = 'reference' AND version <> 1;
   `);
+  // 一致性修复：expo-sqlite 的 withExclusiveTransactionAsync 会新开一条连接，那条连接上
+  // PRAGMA foreign_keys 是默认关闭的，所以事务里的 ON DELETE CASCADE / SET NULL 都不会生效。
+  // 历史上依赖级联的删除（删作品/卷/章/参考书）因此可能留下孤儿行：删掉参考书后文风还在
+  // （选择器里显示"参考书已删除"）、删掉章节后笔记的 chapter_id 还悬着、删掉作品后卷章角色等
+  // 残留。这里把孩子已经不在的行清掉，并把悬空引用改成"上浮"后的合法状态。
+  // 全部语句幂等，每次启动重跑都是空操作。
+  await database.execAsync(`
+    -- 顺序很关键：先删父级（作品还在、但卷/世界书/会话已经失去所属的行），再按"父不存在"
+    -- 清理子级，这样一次启动就能收敛；反过来做会留下要等下次启动才清掉的二级孤儿。
+    DELETE FROM volumes
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = volumes.project_id);
+
+    DELETE FROM chapters
+    WHERE NOT EXISTS (SELECT 1 FROM volumes volume WHERE volume.id = chapters.volume_id)
+       OR NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = chapters.project_id);
+
+    DELETE FROM chapter_fts
+    WHERE NOT EXISTS (SELECT 1 FROM chapters chapter WHERE chapter.id = chapter_fts.chapter_id);
+
+    DELETE FROM chapter_drafts
+    WHERE NOT EXISTS (SELECT 1 FROM chapters chapter WHERE chapter.id = chapter_drafts.chapter_id)
+       OR NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = chapter_drafts.project_id);
+
+    UPDATE chapter_drafts
+    SET style_profile_id = NULL
+    WHERE style_profile_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM style_profiles profile WHERE profile.id = chapter_drafts.style_profile_id);
+
+    DELETE FROM world_info
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = world_info.project_id);
+
+    DELETE FROM world_info_entries
+    WHERE NOT EXISTS (SELECT 1 FROM world_info info WHERE info.id = world_info_entries.world_info_id);
+
+    DELETE FROM characters
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = characters.project_id);
+
+    DELETE FROM vector_chunks
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = vector_chunks.project_id);
+
+    DELETE FROM chat_sessions
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = chat_sessions.project_id);
+
+    DELETE FROM chat_messages
+    WHERE NOT EXISTS (SELECT 1 FROM chat_sessions session WHERE session.id = chat_messages.session_id)
+       OR NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = chat_messages.project_id);
+
+    -- 笔记：作品没了就删；只是章节/卷没了则上浮（两个外键都为空 = 整书笔记）。
+    DELETE FROM notes
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = notes.project_id);
+
+    UPDATE notes
+    SET chapter_id = NULL
+    WHERE chapter_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM chapters chapter WHERE chapter.id = notes.chapter_id);
+
+    UPDATE notes
+    SET volume_id = NULL
+    WHERE volume_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM volumes volume WHERE volume.id = notes.volume_id);
+
+    DELETE FROM style_profiles
+    WHERE kind = 'reference'
+      AND (source_id IS NULL
+        OR NOT EXISTS (SELECT 1 FROM style_sources source WHERE source.id = style_profiles.source_id));
+
+    DELETE FROM style_profiles
+    WHERE kind = 'author'
+      AND (project_id IS NULL
+        OR NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = style_profiles.project_id));
+
+    -- __none__ 是"明确选择不使用文风"的哨兵值（见 NO_STYLE_PROFILE_VALUE），必须保留。
+    DELETE FROM app_settings
+    WHERE key LIKE 'style.activeProfile.%'
+      AND value <> '__none__'
+      AND NOT EXISTS (SELECT 1 FROM style_profiles profile WHERE profile.id = app_settings.value);
+  `);
   await migrateChatSessions(database);
   await migrateProviders(database);
 }

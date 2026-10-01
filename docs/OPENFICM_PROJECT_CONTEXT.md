@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.10.1
+当前正式版本：0.10.2
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.10.1
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.10.2
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.10.1 发布提交，以 v0.10.1 标签为准
-- 本轮审查基线：a5d0aad feat(mobile): 蒸馏后台化与供应商接口选择
-- Release 标签：v0.10.1
+- 最新源码提交：本次 0.10.2 发布提交，以 v0.10.2 标签为准
+- 本轮审查基线：009f27e fix(style): 文风选择器统一并显示来源与内容
+- Release 标签：v0.10.2
 - Android applicationId：com.openfic.mobile
-- versionCode：19
-- versionName：0.10.1
+- versionCode：20
+- versionName：0.10.2
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.10.1.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.10.2.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.10.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版把写作页与助手页的文风选择器收敛成一个组件，并显示来源格式/字数、蒸馏轮次与覆盖进度、指南预览与“全文”只读预览——同名参考文风（多次导入的不同文件）因此能区分，详见 docs/releases/v0.10.1.md。近几个版本：0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）、0.9.0 参考文风改为每本一份持续演进（v0.9.0.md）、0.8.1 内容包白名单漏掉笔记工具导致设置里授权也无法调用（v0.8.1.md）、0.8.0 三级笔记（v0.8.0.md）。
+0.10.2 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版修掉"删参考书后参考文风还在"的根因：`withExclusiveTransactionAsync` 跑在 expo-sqlite 新开的连接上，那条连接没打开 `PRAGMA foreign_keys`，导致独占事务里的级联删除/置空全部失效；依赖级联的删除改为显式删除，启动时加了一段幂等一致性修复清理历史孤儿，详见 docs/releases/v0.10.2.md。近几个版本：0.10.1 文风选择器统一并显示来源与内容（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）、0.9.0 参考文风改为每本一份持续演进（v0.9.0.md）。
 
 ## 3. 功能清单
 
@@ -83,6 +83,7 @@ GitHub 仓库：
 - "继续蒸馏"每次向后随机跳到未读区域再取一个窗口，单向递增不重叠，跳幅受"剩余的一半"和"4 个窗口"双上界约束，必然收敛到书尾；覆盖进度存在 `style.distillation.coverage.<sourceId>`。
 - 多轮证据用增量演进合成：以上一版指南为基线并入本轮新证据，不全量重发历史备忘录，因此轮数不受上下文长度限制。
 - 参考文风每本参考书只保留一份：`saveReferenceStyleProfile` 就地改写（版本号归一为 1），不再每轮插入新版本；启动迁移会把历史 V1/V2/V3 合并到最新一份，并把 `app_settings` 活跃选择与 `chapter_drafts.style_profile_id` 改指保留的那份。
+- **外键陷阱（重要）**：`withExclusiveTransactionAsync` 会在 expo-sqlite 新开的连接上执行事务（`useNewConnection: true`），而 `PRAGMA foreign_keys` 是连接级开关、SQLite 默认关闭，项目只在主连接上打开过它——所以**独占事务里的 `ON DELETE CASCADE` / `ON DELETE SET NULL` 都不会生效**。历史上删参考书/章节/卷/作品因此留下过孤儿数据（表现为选择器里出现"参考书已删除"的文风）。写删除逻辑时必须显式删除子表，并在 `migrate()` 的幂等一致性修复里兜底。
 - 断点记录所属窗口，中断续跑会重放同一段正文，不会复用旧备忘录去分析新窗口。
 - 参考文风与作品无关，可跨作品选择，且每本参考书只有一份、反复蒸馏就地更新（0.9.0 起）；作者文风按作品隔离，并保存递增版本。
 - 助手页和写作页都可选择创作文风；文风会注入主智能体和正文类子智能体。

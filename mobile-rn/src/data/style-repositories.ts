@@ -161,11 +161,30 @@ export async function renameStyleSource(id: string, title: string): Promise<Styl
 export async function deleteStyleSourceRecord(id: string): Promise<void> {
   const database = await getDatabase();
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    await transaction.runAsync(
-      "DELETE FROM app_settings WHERE key LIKE ? AND value IN (SELECT id FROM style_profiles WHERE source_id = ?)",
-      `${ACTIVE_STYLE_KEY_PREFIX}%`,
+    // 独占事务跑在 expo-sqlite 新开的连接上，那里的 PRAGMA foreign_keys 默认关闭，
+    // ON DELETE CASCADE / SET NULL 都不会触发——曾经因此留下过孤儿参考文风（选择器里显示"参考书已删除"）。
+    // 这里显式删除该参考书下的文风，并清掉引用它的活跃选择与章节草稿。
+    const profiles = await transaction.getAllAsync<{ id: string }>(
+      "SELECT id FROM style_profiles WHERE source_id = ?",
       id,
     );
+    const profileIds = profiles.map((profile) => profile.id);
+    if (profileIds.length) {
+      const placeholders = profileIds.map(() => "?").join(", ");
+      await transaction.runAsync(
+        `UPDATE chapter_drafts SET style_profile_id = NULL WHERE style_profile_id IN (${placeholders})`,
+        ...profileIds,
+      );
+      await transaction.runAsync(
+        `DELETE FROM app_settings WHERE key LIKE ? AND value IN (${placeholders})`,
+        `${ACTIVE_STYLE_KEY_PREFIX}%`,
+        ...profileIds,
+      );
+      await transaction.runAsync(
+        `DELETE FROM style_profiles WHERE id IN (${placeholders})`,
+        ...profileIds,
+      );
+    }
     await transaction.runAsync("DELETE FROM style_sources WHERE id = ?", id);
   });
 }
@@ -382,6 +401,8 @@ export async function deleteStyleProfile(id: string): Promise<void> {
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const profile = await transaction.getFirstAsync<{ id: string }>("SELECT id FROM style_profiles WHERE id = ?", id);
     if (!profile) throw new Error("文风版本不存在");
+    // 独占事务里外键不生效，chapter_drafts.style_profile_id 的 SET NULL 要自己写。
+    await transaction.runAsync("UPDATE chapter_drafts SET style_profile_id = NULL WHERE style_profile_id = ?", id);
     await transaction.runAsync(
       "DELETE FROM app_settings WHERE key LIKE ? AND value = ?",
       `${ACTIVE_STYLE_KEY_PREFIX}%`,

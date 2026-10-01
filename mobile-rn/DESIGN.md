@@ -52,6 +52,7 @@
 - 蒸馏只向用户配置的默认模型发送最多六段分布式抽样，不上传完整参考书；EPUB 解压条目、总文本和最终字符数均有上限。
 - 蒸馏任务的状态放在 `src/style/distillation-store.ts`（zustand）+ `distillation-runner.ts`：页面只发起、不 await，关窗口与离开页面都不影响任务；进度、取消与完成提示由顶部横幅和参考书弹层订阅同一份状态。取消通过外部 AbortSignal 一路传到 `callModel`/`requestJson`，已完成的批次备忘录留在断点里可续跑。仅保证应用内后台，App 被系统回收时不继续。
 - OpenAI 兼容供应商在 `providers.api_mode` 上区分 `chat/completions` 与 `responses` 两套接口；请求与响应映射是 `src/llm/responses-api.ts` 里的纯函数，便于脱离 RN 断言。切换接口会同时影响普通对话、Agent 与蒸馏。
+- 危险点：`withExclusiveTransactionAsync` 会在 expo-sqlite 新开的连接上执行事务（`useNewConnection: true`），而 `PRAGMA foreign_keys` 是连接级开关、SQLite 默认关闭，应用只在主连接上打开过它。**独占事务里的 `ON DELETE CASCADE` / `ON DELETE SET NULL` 不会生效**，删除子表必须显式写出；数据库不可达的残留由启动时的一致性修复兜底。
 - `style_profiles` 保存参考文风与作品级作者文风：参考文风每本参考书只有一份，反复蒸馏就地更新（历史遗留的 V1/V2/V3 在启动迁移里合并到最新一份并把引用改指过去）；作者文风按作品保存版本链。作品通过显式设置选择一份文风或“不使用文风”。
 - `chapter_drafts` 关联 Agent 生成的 AI 原稿、当时使用的文风和作者定稿。只有最新 AI 原稿存在真实作者修改时才允许进化，撤回到原稿会清除待进化状态。
 - 文风进化直接使用当前模型比较 AI 原稿与作者定稿，不存在服务地址或 FastAPI 运行依赖。
@@ -110,6 +111,10 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 ### 2026-08-19 - OpenFicM 0.6.0 导出与可恢复编辑
 
 写作页改为预览优先并支持章节、卷、全书 Markdown 导出；助手增加失败请求重试和历史用户消息编辑，编辑点之后的线性上下文通过事务统一重建。
+
+### 2026-10-02 - 修复独占事务里外键不生效导致的孤儿数据
+
+用户报告“删了参考书，参考文风还在”。根因是 `withExclusiveTransactionAsync` 在新连接上执行事务，那条连接没有打开 `PRAGMA foreign_keys`，导致删参考书、删章节、删卷、删作品时的 CASCADE 与 SET NULL 全部失效。本版把依赖级联的删除改成显式删除，并在启动时加一段幂等的一致性修复清理历史孤儿（笔记按设计上浮）。教训写进数据模型一节。
 
 ### 2026-10-02 - 文风选择器统一并显示来源与内容
 

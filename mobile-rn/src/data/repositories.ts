@@ -205,7 +205,23 @@ export async function createProject(title: string, description = ""): Promise<Pr
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDatabase();
   await db.withExclusiveTransactionAsync(async (txn) => {
+    // 独占事务跑在 expo-sqlite 新开的连接上，那里的 PRAGMA foreign_keys 是默认关闭的，
+    // 所以 ON DELETE CASCADE / SET NULL 都不会触发；级联关系必须在这里显式写出来。
+    await txn.runAsync("DELETE FROM chapter_drafts WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM chapter_fts WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM vector_chunks WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM chat_messages WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM chat_sessions WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM notes WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM chapters WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM volumes WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM characters WHERE project_id = ?", id);
+    await txn.runAsync(
+      "DELETE FROM world_info_entries WHERE world_info_id IN (SELECT id FROM world_info WHERE project_id = ?)",
+      id,
+    );
+    await txn.runAsync("DELETE FROM world_info WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM style_profiles WHERE kind = 'author' AND project_id = ?", id);
     await txn.runAsync("DELETE FROM projects WHERE id = ?", id);
     await txn.runAsync(
       `DELETE FROM app_settings
@@ -280,6 +296,20 @@ export async function deleteVolume(id: string): Promise<void> {
       volume.project_id,
       id,
     );
+    // 独占事务里外键不生效，CASCADE/SET NULL 都要自己写：先删草稿，笔记上浮到整书级，再删章节。
+    await txn.runAsync(
+      "DELETE FROM chapter_drafts WHERE chapter_id IN (SELECT id FROM chapters WHERE volume_id = ?)",
+      id,
+    );
+    await txn.runAsync(
+      `UPDATE notes SET volume_id = NULL, chapter_id = NULL
+       WHERE project_id = ?
+         AND (volume_id = ? OR chapter_id IN (SELECT id FROM chapters WHERE volume_id = ?))`,
+      volume.project_id,
+      id,
+      id,
+    );
+    await txn.runAsync("DELETE FROM chapters WHERE volume_id = ?", id);
     await txn.runAsync("DELETE FROM volumes WHERE id = ?", id);
     await txn.runAsync("UPDATE projects SET updated_at = ? WHERE id = ?", now, volume.project_id);
     if ((chapterCountRow?.chapter_count ?? 0) > 0) {
@@ -413,6 +443,9 @@ export async function deleteChapter(id: string): Promise<void> {
     if (!chapter) throw new Error("章节不存在");
     await txn.runAsync("DELETE FROM chapter_fts WHERE chapter_id = ?", id);
     await txn.runAsync("DELETE FROM vector_chunks WHERE project_id = ? AND source_type = 'chapter' AND source_id = ?", chapter.project_id, id);
+    // 独占事务里外键不生效：草稿要显式删，笔记要显式上浮到卷级（chapter_id 置空、volume_id 保留）。
+    await txn.runAsync("DELETE FROM chapter_drafts WHERE chapter_id = ?", id);
+    await txn.runAsync("UPDATE notes SET chapter_id = NULL WHERE chapter_id = ?", id);
     await txn.runAsync("DELETE FROM chapters WHERE id = ?", id);
     await txn.runAsync("UPDATE projects SET updated_at = ? WHERE id = ?", now, chapter.project_id);
     await txn.runAsync(
