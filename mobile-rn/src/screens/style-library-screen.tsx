@@ -86,6 +86,16 @@ export function StyleLibraryScreen() {
     () => profiles.filter((profile) => profile.kind === "reference"),
     [profiles],
   );
+  // 按文件字节去重，所以同名多份只可能是多次导入的不同文件；这里标出来，方便逐份清理。
+  const sourceTitleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const source of sources) counts.set(source.title, (counts.get(source.title) ?? 0) + 1);
+    return counts;
+  }, [sources]);
+  const hasDuplicateSourceTitles = [...sourceTitleCounts.values()].some((count) => count > 1);
+  const selectedProfileSource = selectedProfile?.sourceId
+    ? sources.find((source) => source.id === selectedProfile.sourceId) ?? null
+    : null;
   const coverageStarted = Boolean(distillationCoverage && distillationCoverage.coveredUntil > 0);
   const coverageFinished = Boolean(distillationCoverage
     && distillationCoverage.coveredUntil >= distillationCoverage.totalUnits);
@@ -417,6 +427,11 @@ export function StyleLibraryScreen() {
               <Text style={styles.sectionTitle}>参考小说</Text>
               <Text style={styles.sectionMeta}>{sources.length} 本</Text>
             </View>
+            {hasDuplicateSourceTitles ? (
+              <Text style={styles.helperText}>
+                有同名参考书：同名条目是多次导入的不同文件（按文件内容判重，同一个文件重复导入会被拒绝），各自带一份参考文风。不需要的那几份删掉参考书即可连带删掉它的文风。
+              </Text>
+            ) : null}
           </View>
         )}
         ListEmptyComponent={(
@@ -431,7 +446,10 @@ export function StyleLibraryScreen() {
             <View style={styles.sourceCopy}>
               <Text style={styles.sourceTitle} numberOfLines={1}>{item.title}</Text>
               <Text style={styles.sourceMeta} numberOfLines={1}>{formatName(item)} · {formatBytes(item.sizeBytes)} · {item.characterCount.toLocaleString()} 字</Text>
-              <Text style={styles.sourceMeta} numberOfLines={1}>{referenceProfiles.some((profile) => profile.sourceId === item.id) ? "已生成参考文风" : "尚未蒸馏文风"}</Text>
+              <Text style={styles.sourceMeta} numberOfLines={1}>
+                {referenceProfiles.some((profile) => profile.sourceId === item.id) ? "已生成参考文风" : "尚未蒸馏文风"}
+                {(sourceTitleCounts.get(item.title) ?? 0) > 1 ? ` · 同名 ${sourceTitleCounts.get(item.title)} 份` : ""}
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.textMuted} />
           </Pressable>
@@ -549,7 +567,13 @@ export function StyleLibraryScreen() {
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
                 <Text style={styles.sheetTitle} numberOfLines={2}>{selectedProfile ? styleProfileLabel(selectedProfile) : ""}</Text>
-                <Text style={styles.sheetMeta}>{selectedProfile?.kind === "author" ? "作者文风版本" : "参考小说文风"}</Text>
+                <Text style={styles.sheetMeta}>
+                  {selectedProfile?.kind === "author"
+                    ? "作者文风版本"
+                    : selectedProfileSource
+                      ? `参考小说文风 · ${selectedProfileSource.format === "epub" ? "EPUB" : selectedProfileSource.format === "markdown" ? "Markdown" : "TXT"} · ${selectedProfileSource.characterCount.toLocaleString()} 字`
+                      : "参考小说文风（对应参考书已删除）"}
+                </Text>
               </View>
               <Pressable accessibilityLabel="关闭文风详情" onPress={() => setSelectedProfile(null)} style={styles.iconButton}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />

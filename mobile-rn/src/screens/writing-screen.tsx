@@ -16,6 +16,7 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
+import { StyleProfilePickerSheet } from "@/components/style-profile-picker";
 import { exportNovel, type ExportScope } from "@/lib/export";
 import { styleProfileLabel } from "@/lib/style-label";
 import { countNotesUnder, deleteNotesUnder } from "@/data/note-repositories";
@@ -39,11 +40,11 @@ import {
 } from "@/data/chapter-draft-repositories";
 import {
   getActiveStyleProfile,
-  listStyleProfiles,
   setActiveStyleProfile,
 } from "@/data/style-repositories";
 import { resolveModelSelection } from "@/llm/selection";
 import { evolveAuthorStyle } from "@/settings/lorn-style-plugin";
+import { listStyleProfileOptions, type StyleProfileOption } from "@/style/profile-options";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
 import type { Chapter, ChapterDraftSnapshot, Project, StyleProfile, Volume } from "@/types";
@@ -94,7 +95,7 @@ export function WritingScreen() {
   const [exportPickerVisible, setExportPickerVisible] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [styleOptions, setStyleOptions] = useState<StyleProfileOption[]>([]);
   const [activeStyleProfile, setActiveStyleProfileState] = useState<StyleProfile | null>(null);
   const [stylePickerVisible, setStylePickerVisible] = useState(false);
   const [pendingEvolution, setPendingEvolution] = useState<ChapterDraftSnapshot | null>(null);
@@ -152,15 +153,15 @@ export function WritingScreen() {
       getProject(projectId),
       listVolumes(projectId),
       listChapters(projectId),
-      listStyleProfiles(projectId),
+      listStyleProfileOptions(projectId),
       getActiveStyleProfile(projectId),
     ])
-      .then(([nextProject, nextVolumes, nextChapters, nextStyleProfiles, nextActiveStyle]) => {
+      .then(([nextProject, nextVolumes, nextChapters, nextStyleOptions, nextActiveStyle]) => {
         if (cancelled) return;
         setProject(nextProject);
         setVolumes(nextVolumes);
         setChapters(nextChapters);
-        setStyleProfiles(nextStyleProfiles);
+        setStyleOptions(nextStyleOptions);
         setActiveStyleProfileState(nextActiveStyle);
         const selectedId = useAppStore.getState().currentChapterId;
         if (!selectedId || !nextChapters.some((chapter) => chapter.id === selectedId)) {
@@ -493,10 +494,7 @@ export function WritingScreen() {
         selection,
       });
       await markChapterStyleEvolved(pendingEvolution.id);
-      setStyleProfiles((current) => [
-        evolved.profile,
-        ...current.filter((profile) => profile.id !== evolved.profile.id),
-      ]);
+      setStyleOptions(await listStyleProfileOptions(projectId));
       setActiveStyleProfileState(evolved.profile);
       setPendingEvolution(null);
       refreshData();
@@ -645,42 +643,14 @@ export function WritingScreen() {
         )}
       </KeyboardAvoidingView>
 
-      <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
-        <SheetBackdrop onPress={() => setStylePickerVisible(false)}>
-          <View style={styles.actionSheet}>
-            <View style={styles.exportHeader}>
-              <View>
-                <Text style={styles.sheetTitle}>选择创作文风</Text>
-                <Text style={styles.styleSheetMeta}>会用于助手后续生成或修改正文</Text>
-              </View>
-              <Pressable accessibilityLabel="关闭文风列表" onPress={() => setStylePickerVisible(false)} style={styles.iconButton}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </Pressable>
-            </View>
-            <ScrollView style={styles.styleList} contentContainerStyle={styles.styleListContent}>
-              <Pressable onPress={() => void chooseStyle(null)} style={[styles.styleOption, !activeStyleProfile && styles.styleOptionActive]}>
-                <Ionicons name={!activeStyleProfile ? "radio-button-on" : "radio-button-off"} size={20} color={!activeStyleProfile ? colors.primary : colors.textMuted} />
-                <View style={styles.styleOptionCopy}>
-                  <Text style={styles.styleOptionTitle}>不使用文风</Text>
-                  <Text style={styles.styleOptionMeta}>只遵循本轮要求与作品设定</Text>
-                </View>
-              </Pressable>
-              {styleProfiles.map((profile) => {
-                const selected = profile.id === activeStyleProfile?.id;
-                return (
-                  <Pressable key={profile.id} onPress={() => void chooseStyle(profile)} style={[styles.styleOption, selected && styles.styleOptionActive]}>
-                    <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
-                    <View style={styles.styleOptionCopy}>
-                      <Text style={styles.styleOptionTitle} numberOfLines={1}>{styleProfileLabel(profile)}</Text>
-                      <Text style={styles.styleOptionMeta}>{profile.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </SheetBackdrop>
-      </Modal>
+      <StyleProfilePickerSheet
+        visible={stylePickerVisible}
+        subtitle="会用于助手后续生成或修改正文"
+        options={styleOptions}
+        activeProfileId={activeStyleProfile?.id ?? null}
+        onSelect={(profile) => void chooseStyle(profile)}
+        onClose={() => setStylePickerVisible(false)}
+      />
 
       <Modal visible={chapterPickerVisible} transparent animationType="slide" onRequestClose={() => setChapterPickerVisible(false)}>
         <SheetBackdrop onPress={() => setChapterPickerVisible(false)}>
@@ -934,14 +904,6 @@ const styles = StyleSheet.create({
   },
   sheetHeaderActions: { flexDirection: "row", alignItems: "center" },
   sheetTitle: { color: colors.text, fontSize: 18, fontWeight: "700" },
-  styleSheetMeta: { marginTop: 2, color: colors.textMuted, fontSize: 12 },
-  styleList: { maxHeight: 420 },
-  styleListContent: { paddingBottom: spacing.sm },
-  styleOption: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  styleOptionActive: { backgroundColor: colors.surfaceMuted },
-  styleOptionCopy: { flex: 1, minWidth: 0 },
-  styleOptionTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
-  styleOptionMeta: { marginTop: 3, color: colors.textMuted, fontSize: 12 },
   directoryList: { paddingBottom: spacing.lg },
   volumeHeader: {
     minHeight: 50,

@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.10.0
+当前正式版本：0.10.1
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.10.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.10.1
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.10.0 发布提交，以 v0.10.0 标签为准
-- 本轮审查基线：685a4b8 feat(style): 参考文风改为单文件持续演进
-- Release 标签：v0.10.0
+- 最新源码提交：本次 0.10.1 发布提交，以 v0.10.1 标签为准
+- 本轮审查基线：a5d0aad feat(mobile): 蒸馏后台化与供应商接口选择
+- Release 标签：v0.10.1
 - Android applicationId：com.openfic.mobile
-- versionCode：18
-- versionName：0.10.0
+- versionCode：19
+- versionName：0.10.1
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.10.0.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.10.1.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.10.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版把文风蒸馏改成应用内后台任务（可离开页面、可取消、断点可续），并补齐模型与供应商的三处短板：OpenAI 兼容可选 chat/completions 或 responses 接口、获取到的模型点一下即入库、单个模型可删可改参数，详见 docs/releases/v0.10.0.md。近几个版本：0.9.0 参考文风改为每本一份持续演进（v0.9.0.md）、0.8.1 内容包白名单漏掉笔记工具导致设置里授权也无法调用（v0.8.1.md）、0.8.0 三级笔记（v0.8.0.md）、0.7.7 弹层滚动被 responder 抢占（v0.7.7.md）。
+0.10.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版把写作页与助手页的文风选择器收敛成一个组件，并显示来源格式/字数、蒸馏轮次与覆盖进度、指南预览与“全文”只读预览——同名参考文风（多次导入的不同文件）因此能区分，详见 docs/releases/v0.10.1.md。近几个版本：0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）、0.9.0 参考文风改为每本一份持续演进（v0.9.0.md）、0.8.1 内容包白名单漏掉笔记工具导致设置里授权也无法调用（v0.8.1.md）、0.8.0 三级笔记（v0.8.0.md）。
 
 ## 3. 功能清单
 

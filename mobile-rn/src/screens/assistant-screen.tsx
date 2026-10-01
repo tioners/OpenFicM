@@ -19,6 +19,7 @@ import { AgentRunError, runAgent } from "@/agent/runtime";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
 import { MessageActionBar } from "@/components/message-action-bar";
 import { Button, EmptyState, ErrorNotice, Header, Screen, SheetBackdrop } from "@/components/ui";
+import { StyleProfilePickerSheet } from "@/components/style-profile-picker";
 import { styleProfileLabel } from "@/lib/style-label";
 import {
   addMessage,
@@ -38,11 +39,11 @@ import {
 } from "@/data/repositories";
 import {
   getActiveStyleProfile,
-  listStyleProfiles,
   setActiveStyleProfile,
 } from "@/data/style-repositories";
 import type { RootTabParamList } from "@/navigation/types";
 import { getAgentDefinitions } from "@/settings/config";
+import { listStyleProfileOptions, type StyleProfileOption } from "@/style/profile-options";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
 import type {
@@ -181,7 +182,7 @@ export function AssistantScreen() {
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [activeAgentName, setActiveAgentName] = useState("Build");
-  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [styleOptions, setStyleOptions] = useState<StyleProfileOption[]>([]);
   const [activeStyleProfile, setActiveStyleProfileState] = useState<StyleProfile | null>(null);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [input, setInput] = useState("");
@@ -223,7 +224,7 @@ export function AssistantScreen() {
       setDefaultModelId(null);
       setActiveAgentId(null);
       setActiveAgentName("Build");
-      setStyleProfiles([]);
+      setStyleOptions([]);
       setActiveStyleProfileState(null);
       setSelection(null);
       setLiveTrace(null);
@@ -243,7 +244,7 @@ export function AssistantScreen() {
         nextProviders,
         activeAgentId,
         agents,
-        nextStyleProfiles,
+        nextStyleOptions,
         nextActiveStyleProfile,
       ] = await Promise.all([
         getProject(projectId),
@@ -254,7 +255,7 @@ export function AssistantScreen() {
         listProviders(),
         getSetting("agent.activeDefinitionId"),
         getAgentDefinitions(),
-        listStyleProfiles(projectId),
+        listStyleProfileOptions(projectId),
         getActiveStyleProfile(projectId),
       ]);
       if (!nextProject) throw new Error("作品不存在");
@@ -301,7 +302,7 @@ export function AssistantScreen() {
       setDefaultModelId(nextDefaultModelId);
       setActiveAgentId(activeAgent?.id ?? null);
       setActiveAgentName(activeAgent?.name ?? "Build");
-      setStyleProfiles(nextStyleProfiles);
+      setStyleOptions(nextStyleOptions);
       setActiveStyleProfileState(nextActiveStyleProfile);
       setSelection(nextSelection);
       setError(selectionError);
@@ -850,47 +851,14 @@ export function AssistantScreen() {
           </View>
         </SheetBackdrop>
       </Modal>
-      <Modal visible={stylePickerVisible} transparent animationType="slide" onRequestClose={() => setStylePickerVisible(false)}>
-        <SheetBackdrop onPress={() => setStylePickerVisible(false)}>
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetTitleWrap}>
-                <Text style={styles.sheetTitle}>选择创作文风</Text>
-                <Text style={styles.sheetSubtitle}>{project?.title ?? "当前作品"}</Text>
-              </View>
-              <Pressable accessibilityLabel="关闭文风列表" onPress={() => setStylePickerVisible(false)} style={styles.iconButton}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </Pressable>
-            </View>
-            <FlatList
-              data={styleProfiles}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.sheetList}
-              ListHeaderComponent={(
-                <Pressable onPress={() => void chooseStyle(null)} style={[styles.sheetRow, !activeStyleProfile && styles.sheetRowActive]}>
-                  <Ionicons name={!activeStyleProfile ? "radio-button-on" : "radio-button-off"} size={20} color={!activeStyleProfile ? colors.primary : colors.textMuted} />
-                  <View style={styles.sheetRowText}>
-                    <Text style={styles.sheetRowTitle}>不使用文风</Text>
-                    <Text style={styles.sheetRowMeta}>仅遵循作品设定和本轮要求</Text>
-                  </View>
-                </Pressable>
-              )}
-              renderItem={({ item }) => {
-                const selected = item.id === activeStyleProfile?.id;
-                return (
-                  <Pressable onPress={() => void chooseStyle(item)} style={[styles.sheetRow, selected && styles.sheetRowActive]}>
-                    <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
-                    <View style={styles.sheetRowText}>
-                      <Text style={styles.sheetRowTitle} numberOfLines={1}>{styleProfileLabel(item)}</Text>
-                      <Text style={styles.sheetRowMeta}>{item.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
-                    </View>
-                  </Pressable>
-                );
-              }}
-            />
-          </View>
-        </SheetBackdrop>
-      </Modal>
+      <StyleProfilePickerSheet
+        visible={stylePickerVisible}
+        subtitle={project?.title ?? "当前作品"}
+        options={styleOptions}
+        activeProfileId={activeStyleProfile?.id ?? null}
+        onSelect={(profile) => void chooseStyle(profile)}
+        onClose={() => setStylePickerVisible(false)}
+      />
       <AgentQuestionSheet
         request={pendingQuestion}
         onSubmit={(answers) => finishQuestion({ answers, cancelled: false })}
