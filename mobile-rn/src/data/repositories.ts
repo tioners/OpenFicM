@@ -8,6 +8,7 @@ import type {
   ChatMessageMetadata,
   ChatSession,
   Model,
+  OpenAiApiMode,
   Project,
   Provider,
   ProviderType,
@@ -25,7 +26,7 @@ const MAX_EDITOR_CONTENT_LINES = 2_000;
 type ProjectRow = { id: string; title: string; description: string; created_at: string; updated_at: string };
 type VolumeRow = { id: string; project_id: string; title: string; order_index: number };
 type ChapterRow = { id: string; project_id: string; volume_id: string; title: string; content: string; order_index: number; updated_at: string };
-type ProviderRow = { id: string; name: string; type: ProviderType; base_url: string; api_key_ref: string; created_at: string };
+type ProviderRow = { id: string; name: string; type: ProviderType; base_url: string; api_mode: string | null; api_key_ref: string; created_at: string };
 type ModelRow = { id: string; provider_id: string; name: string; model_id: string; temperature: number; max_tokens: number };
 type SessionRow = { id: string; project_id: string; title: string; model_id: string | null; created_at: string; updated_at: string };
 type MessageRow = {
@@ -80,6 +81,7 @@ const mapChapter = (row: ChapterRow): Chapter => ({
 });
 const mapProvider = (row: ProviderRow): Provider => ({
   id: row.id, name: row.name, type: row.type, baseUrl: row.base_url,
+  apiMode: row.api_mode === "responses" ? "responses" : "chat-completions",
   apiKeyRef: row.api_key_ref, createdAt: row.created_at,
 });
 const mapModel = (row: ModelRow): Model => ({
@@ -445,32 +447,59 @@ export async function listProviders(): Promise<Provider[]> {
   return (await db.getAllAsync<ProviderRow>("SELECT * FROM providers ORDER BY created_at")).map(mapProvider);
 }
 
-export async function saveProvider(input: { id?: string; name: string; type: ProviderType; baseUrl: string; apiKey: string }): Promise<Provider> {
+function normalizeApiMode(type: ProviderType, value: OpenAiApiMode | undefined): OpenAiApiMode {
+  if (type !== "openai-compatible") return "chat-completions";
+  return value === "responses" ? "responses" : "chat-completions";
+}
+
+export async function saveProvider(input: {
+  id?: string;
+  name: string;
+  type: ProviderType;
+  baseUrl: string;
+  /** 编辑已有供应商时留空表示保持原 Key 不变。 */
+  apiKey: string;
+  apiMode?: OpenAiApiMode;
+}): Promise<Provider> {
   const db = await getDatabase();
   const id = input.id ?? createId();
   const name = requiredText(input.name, "供应商名称");
   const baseUrl = normalizeBaseUrl(input.baseUrl);
-  const apiKey = requiredText(input.apiKey, "API Key");
+  const apiMode = normalizeApiMode(input.type, input.apiMode);
   const apiKeyRef = `openfic.provider.${id}`;
   const now = new Date().toISOString();
   const existing = await db.getFirstAsync<ProviderRow>("SELECT * FROM providers WHERE id = ?", id);
   const previousApiKey = existing ? await SecureStore.getItemAsync(existing.api_key_ref) : null;
-  await SecureStore.setItemAsync(apiKeyRef, apiKey);
+  const apiKey = input.apiKey.trim();
+  // 编辑时留空只改名称/地址/接口，不覆盖已保存的 Key，避免"改个名字还要重新粘贴密钥"。
+  const nextApiKey = apiKey || previousApiKey || "";
+  if (!nextApiKey) throw new Error("API Key 不能为空");
+  if (apiKey) await SecureStore.setItemAsync(apiKeyRef, apiKey);
   try {
     await db.withExclusiveTransactionAsync(async (txn) => {
       await txn.runAsync(`
-        INSERT INTO providers(id, name, type, base_url, api_key_ref, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO providers(id, name, type, base_url, api_mode, api_key_ref, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET name = excluded.name, type = excluded.type,
-          base_url = excluded.base_url, api_key_ref = excluded.api_key_ref
-      `, id, name, input.type, baseUrl, apiKeyRef, existing?.created_at ?? now);
+          base_url = excluded.base_url, api_mode = excluded.api_mode, api_key_ref = excluded.api_key_ref
+      `, id, name, input.type, baseUrl, apiMode, apiKeyRef, existing?.created_at ?? now);
     });
   } catch (error) {
-    if (previousApiKey === null) await SecureStore.deleteItemAsync(apiKeyRef);
-    else await SecureStore.setItemAsync(apiKeyRef, previousApiKey);
+    if (apiKey) {
+      if (previousApiKey === null) await SecureStore.deleteItemAsync(apiKeyRef);
+      else await SecureStore.setItemAsync(apiKeyRef, previousApiKey);
+    }
     throw error;
   }
-  return { id, name, type: input.type, baseUrl, apiKeyRef, createdAt: existing?.created_at ?? now };
+  return {
+    id,
+    name,
+    type: input.type,
+    baseUrl,
+    apiMode,
+    apiKeyRef,
+    createdAt: existing?.created_at ?? now,
+  };
 }
 
 export async function getProviderApiKey(provider: Provider): Promise<string> {
@@ -492,6 +521,17 @@ export async function deleteProvider(provider: Provider): Promise<void> {
   await SecureStore.deleteItemAsync(provider.apiKeyRef).catch(() => undefined);
 }
 
+/** 删除单个模型：默认模型指向它时清空设置，会话引用置空，供应商本身保留。 */
+export async function deleteModel(model: Model): Promise<void> {
+  const db = await getDatabase();
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const active = await txn.getFirstAsync<{ value: string }>("SELECT value FROM app_settings WHERE key = 'activeModelId'");
+    if (active?.value === model.id) await txn.runAsync("DELETE FROM app_settings WHERE key = 'activeModelId'");
+    await txn.runAsync("UPDATE chat_sessions SET model_id = NULL WHERE model_id = ?", model.id);
+    await txn.runAsync("DELETE FROM models WHERE id = ?", model.id);
+  });
+}
+
 export async function listModels(providerId?: string): Promise<Model[]> {
   const db = await getDatabase();
   const rows = providerId
@@ -511,6 +551,15 @@ export async function saveModel(input: Omit<Model, "id"> & { id?: string }): Pro
   }
   const provider = await db.getFirstAsync<{ id: string }>("SELECT id FROM providers WHERE id = ?", input.providerId);
   if (!provider) throw new Error("供应商不存在");
+  if (!input.id) {
+    // 从供应商模型列表一键添加时很容易点到重复项，这里兜住，别让同一模型在列表里出现两次。
+    const duplicate = await db.getFirstAsync<{ id: string }>(
+      "SELECT id FROM models WHERE provider_id = ? AND model_id = ?",
+      input.providerId,
+      modelId,
+    );
+    if (duplicate) throw new Error(`该供应商下已有模型 ${modelId}`);
+  }
   await db.withExclusiveTransactionAsync(async (txn) => {
     await txn.runAsync(`
       INSERT INTO models(id, provider_id, name, model_id, temperature, max_tokens)

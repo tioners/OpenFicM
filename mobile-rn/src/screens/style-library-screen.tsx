@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -29,13 +29,14 @@ import { styleProfileLabel } from "@/lib/style-label";
 import { resolveModelSelection } from "@/llm/selection";
 import type { RootStackParamList } from "@/navigation/types";
 import {
-  distillReferenceStyle,
   getStyleDistillationCheckpoint,
   getStyleDistillationCoverage,
   type StyleDistillationCheckpoint,
   type StyleDistillationCoverage,
 } from "@/settings/lorn-style-plugin";
 import { importStyleSource, deleteStyleSource } from "@/style/source-library";
+import { useStyleDistillationStore } from "@/style/distillation-store";
+import { cancelStyleDistillation, startStyleDistillation } from "@/style/distillation-runner";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
 import type { StyleProfile, StyleSource } from "@/types";
@@ -63,7 +64,6 @@ export function StyleLibraryScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [distillationError, setDistillationError] = useState<string | null>(null);
-  const [distillationProgress, setDistillationProgress] = useState("");
   const [distillationCheckpoint, setDistillationCheckpoint] = useState<StyleDistillationCheckpoint | null>(null);
   const [distillationCoverage, setDistillationCoverage] = useState<StyleDistillationCoverage | null>(null);
   const [distillationModelName, setDistillationModelName] = useState<string | null>(null);
@@ -71,6 +71,12 @@ export function StyleLibraryScreen() {
   const [editingSource, setEditingSource] = useState(false);
   const [editingAuthorGuide, setEditingAuthorGuide] = useState(false);
   const [authorGuide, setAuthorGuide] = useState("");
+  // 蒸馏任务活在 store 里：离开本页也继续跑，回来后横幅和弹层仍能看到实时进度。
+  const runningTask = useStyleDistillationStore((state) => state.task);
+  const distillationOutcome = useStyleDistillationStore((state) => state.outcome);
+  const distillationRevision = useStyleDistillationStore((state) => state.revision);
+  const dismissOutcome = useStyleDistillationStore((state) => state.dismissOutcome);
+  const selectedSourceRef = useRef<StyleSource | null>(null);
 
   const authorProfiles = useMemo(
     () => profiles.filter((profile) => profile.kind === "author"),
@@ -84,6 +90,10 @@ export function StyleLibraryScreen() {
   const coverageFinished = Boolean(distillationCoverage
     && distillationCoverage.coveredUntil >= distillationCoverage.totalUnits);
   const coverageUnitName = distillationCoverage?.unitKind === "segment" ? "段" : "章";
+  const taskForSelectedSource = runningTask && selectedSource && runningTask.sourceId === selectedSource.id
+    ? runningTask
+    : null;
+  const outcomeUnitName = distillationOutcome?.unitKind === "segment" ? "段" : "章";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,13 +121,7 @@ export function StyleLibraryScreen() {
     void load();
   }, [load]));
 
-  const openSource = async (source: StyleSource) => {
-    setSelectedSource(source);
-    setEditingSource(false);
-    setSourceTitle(source.title);
-    setError(null);
-    setDistillationError(null);
-    setDistillationProgress("");
+  const loadSourceDetail = useCallback(async (source: StyleSource) => {
     try {
       const [nextProfiles, checkpoint, coverage] = await Promise.all([
         listStyleProfilesForSource(source.id),
@@ -131,15 +135,36 @@ export function StyleLibraryScreen() {
       setError(sourceError instanceof Error ? sourceError.message : String(sourceError));
       setSourceProfiles([]);
     }
+  }, []);
+
+  useEffect(() => {
+    selectedSourceRef.current = selectedSource;
+  }, [selectedSource]);
+
+  // 后台蒸馏结束时自增 revision：刷新书库列表，弹层开着就同时刷新这份参考书的详情。
+  useEffect(() => {
+    if (!distillationRevision) return;
+    void load();
+    const source = selectedSourceRef.current;
+    if (source) void loadSourceDetail(source);
+  }, [distillationRevision, load, loadSourceDetail]);
+
+  const openSource = async (source: StyleSource) => {
+    setSelectedSource(source);
+    selectedSourceRef.current = source;
+    setEditingSource(false);
+    setSourceTitle(source.title);
+    setError(null);
+    setDistillationError(null);
+    await loadSourceDetail(source);
   };
 
   const closeSource = () => {
-    if (busy) return;
     setSelectedSource(null);
+    selectedSourceRef.current = null;
     setSourceProfiles([]);
     setEditingSource(false);
     setDistillationError(null);
-    setDistillationProgress("");
     setDistillationCheckpoint(null);
     setDistillationCoverage(null);
   };
@@ -170,37 +195,16 @@ export function StyleLibraryScreen() {
 
   const distill = async (restart = false) => {
     if (!selectedSource) return;
-    setBusy(true);
     setError(null);
     setDistillationError(null);
-    setDistillationProgress(restart ? "重新开始蒸馏章节样本" : "准备蒸馏章节样本");
-    try {
-      const selection = await resolveModelSelection();
-      const result = await distillReferenceStyle({
-        sourceId: selectedSource.id,
-        selection,
-        restart,
-        onProgress: ({ label, completed, total }) => {
-          setDistillationProgress(total > 1 ? `${label}（${completed}/${total}）` : label);
-        },
-      });
-      setSourceProfiles((current) => [result.profile, ...current.filter((item) => item.id !== result.profile.id)]);
-      setProfiles((current) => [result.profile, ...current.filter((item) => item.id !== result.profile.id)]);
-      setDistillationCheckpoint(null);
-      setDistillationCoverage(result.coverage);
-      openProfile(result.profile);
-    } catch (distillError) {
-      const message = distillError instanceof Error ? distillError.message : String(distillError);
-      setError(message);
-      setDistillationError(message);
-      const [checkpoint, coverage] = await Promise.all([
-        getStyleDistillationCheckpoint(selectedSource.id).catch(() => null),
-        getStyleDistillationCoverage(selectedSource.id).catch(() => null),
-      ]);
-      setDistillationCheckpoint(checkpoint);
-      setDistillationCoverage(coverage?.contentHash === selectedSource.contentHash ? coverage : null);
-    } finally {
-      setBusy(false);
+    const started = await startStyleDistillation({
+      sourceId: selectedSource.id,
+      sourceTitle: selectedSource.title,
+      restart,
+    });
+    if (!started.started && started.message) {
+      setError(started.message);
+      setDistillationError(started.message);
     }
   };
 
@@ -348,6 +352,42 @@ export function StyleLibraryScreen() {
                 <Text style={styles.introText}>导入本机小说后，使用当前默认模型提取独立文风 Skill。原书不会自动上传，只有蒸馏时发送抽样文本。</Text>
               </View>
             </View>
+            {runningTask ? (
+              <View style={styles.taskBanner}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <View style={styles.taskBannerCopy}>
+                  <Text style={styles.taskBannerTitle}>正在蒸馏《{runningTask.sourceTitle}》</Text>
+                  <Text style={styles.taskBannerText} numberOfLines={2}>
+                    {runningTask.label}；可以离开这一页做别的事，任务会继续跑。
+                  </Text>
+                </View>
+                <Pressable accessibilityLabel="取消蒸馏" onPress={() => cancelStyleDistillation()} style={styles.taskBannerAction}>
+                  <Text style={styles.taskBannerActionText}>取消</Text>
+                </Pressable>
+              </View>
+            ) : distillationOutcome ? (
+              <View style={styles.taskBanner}>
+                <Ionicons
+                  name={distillationOutcome.error ? "alert-circle-outline" : distillationOutcome.cancelled ? "pause-circle-outline" : "checkmark-circle-outline"}
+                  size={19}
+                  color={distillationOutcome.error ? colors.danger : colors.primary}
+                />
+                <View style={styles.taskBannerCopy}>
+                  <Text style={styles.taskBannerTitle} numberOfLines={1}>
+                    {distillationOutcome.error ? "蒸馏失败" : distillationOutcome.cancelled ? "已取消蒸馏" : "蒸馏完成"}《{distillationOutcome.sourceTitle}》
+                  </Text>
+                  <Text style={styles.taskBannerText} numberOfLines={3}>
+                    {distillationOutcome.error
+                      ?? (distillationOutcome.cancelled
+                        ? `已完成的部分保留在断点里，已覆盖到第 ${distillationOutcome.coveredUntil}/${distillationOutcome.totalUnits} ${outcomeUnitName}；再次点击“继续蒸馏”会从断点接着跑。`
+                        : `第 ${distillationOutcome.round} 轮，覆盖到第 ${distillationOutcome.coveredUntil}/${distillationOutcome.totalUnits} ${outcomeUnitName}${distillationOutcome.reachedEnd ? "（全书已覆盖）" : ""}。`)}
+                  </Text>
+                </View>
+                <Pressable accessibilityLabel="关闭蒸馏结果提示" onPress={dismissOutcome} style={styles.taskBannerAction}>
+                  <Text style={styles.taskBannerActionText}>关闭</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {projectId ? (
               <View style={styles.activeStrip}>
                 <Ionicons name="checkmark-circle-outline" size={19} color={colors.primary} />
@@ -425,13 +465,16 @@ export function StyleLibraryScreen() {
               ) : (
                 <View style={styles.inlineActions}>
                   <Button
-                    label={coverageStarted ? "继续蒸馏" : "蒸馏文风"}
+                    label={taskForSelectedSource ? "后台蒸馏中" : coverageStarted ? "继续蒸馏" : "蒸馏文风"}
                     onPress={() => void distill()}
-                    disabled={busy || coverageFinished}
-                    loading={busy}
+                    disabled={busy || coverageFinished || Boolean(runningTask)}
+                    loading={Boolean(taskForSelectedSource)}
                   />
+                  {taskForSelectedSource ? (
+                    <Button label="取消蒸馏" variant="secondary" onPress={() => cancelStyleDistillation()} />
+                  ) : null}
                   {coverageStarted || distillationCheckpoint ? (
-                    <Button label="重新开始" variant="secondary" onPress={confirmRestart} disabled={busy} />
+                    <Button label="重新开始" variant="secondary" onPress={confirmRestart} disabled={busy || Boolean(runningTask)} />
                   ) : null}
                   <Pressable accessibilityLabel="重命名参考书" onPress={() => setEditingSource(true)} style={styles.secondaryIconAction}>
                     <Ionicons name="create-outline" size={21} color={colors.text} />
@@ -442,6 +485,14 @@ export function StyleLibraryScreen() {
                 </View>
               )}
               {distillationError ? <ErrorNotice message={distillationError} onRetry={() => void distill()} /> : null}
+              {runningTask && !taskForSelectedSource ? (
+                <View style={styles.checkpointBox}>
+                  <Text style={styles.checkpointTitle}>正在蒸馏《{runningTask.sourceTitle}》</Text>
+                  <Text style={styles.checkpointText}>
+                    同一时间只跑一个蒸馏任务；等它完成或到横幅上取消后，再开始这本书。
+                  </Text>
+                </View>
+              ) : null}
               {distillationCoverage ? (
                 <View style={styles.checkpointBox}>
                   <Text style={styles.checkpointTitle}>
@@ -463,8 +514,13 @@ export function StyleLibraryScreen() {
                   </Text>
                 </View>
               ) : null}
-              {distillationProgress ? (
-                <Text style={styles.progressText}>{distillationProgress}</Text>
+              {taskForSelectedSource ? (
+                <View style={styles.checkpointBox}>
+                  <Text style={styles.checkpointTitle}>蒸馏进行中：{taskForSelectedSource.label}</Text>
+                  <Text style={styles.checkpointText}>
+                    可以关掉这个窗口或离开文风书库，任务会在后台继续，跑完在这里提示结果。
+                  </Text>
+                </View>
               ) : (
                 <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入参考文风，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书；每本书始终只有一份参考文风。</Text>
               )}
@@ -576,6 +632,12 @@ const styles = StyleSheet.create({
   introCopy: { flex: 1, gap: spacing.xs },
   introTitle: { color: colors.text, fontSize: 17, fontWeight: "700" },
   introText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  taskBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  taskBannerCopy: { flex: 1, minWidth: 0, gap: 3 },
+  taskBannerTitle: { color: colors.primary, fontSize: 13, fontWeight: "700" },
+  taskBannerText: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+  taskBannerAction: { minWidth: 52, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  taskBannerActionText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   activeStrip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
   activeStripText: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: "600" },
   clearActive: { minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.sm },
@@ -610,7 +672,6 @@ const styles = StyleSheet.create({
   inlineActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   secondaryIconAction: { width: 46, height: 46, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
   helperText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
-  progressText: { color: colors.primary, fontSize: 13, lineHeight: 19, fontWeight: "600" },
   checkpointBox: { gap: spacing.xs, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
   checkpointTitle: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   checkpointText: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },

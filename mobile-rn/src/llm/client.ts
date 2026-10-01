@@ -3,6 +3,9 @@ import { getSetting } from "@/data/repositories";
 
 import type { AgentMessage, AgentToolCall, AgentToolDefinition, ModelTurn } from "./types";
 import { MAX_CONFIGURED_OUTPUT_TOKENS, normalizeMaxOutputTokens } from "./limits";
+import { buildResponsesRequestBody, parseResponsesTurn } from "./responses-api";
+
+const CANCELLED_MESSAGE = "已取消本次请求";
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_REQUEST_ATTEMPTS = 3;
@@ -71,15 +74,19 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function requestJson(url: string, init: RequestInit): Promise<Record<string, any>> {
+async function requestJson(url: string, init: RequestInit, signal?: AbortSignal): Promise<Record<string, any>> {
   const configuredTimeout = Number(await getSetting("connections.requestTimeout"));
   const requestTimeout = Number.isInteger(configuredTimeout) && configuredTimeout >= 10_000 && configuredTimeout <= 300_000
     ? configuredTimeout
     : REQUEST_TIMEOUT_MS;
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+    if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), requestTimeout);
+    // 外部取消（例如后台蒸馏被用户中止）要立刻打断在途请求；AbortSignal.any 在 Hermes 上不保证可用，手动桥接。
+    const abortFromCaller = () => controller.abort();
+    signal?.addEventListener("abort", abortFromCaller, { once: true });
     try {
       const response = await fetch(url, { ...init, signal: controller.signal });
       const text = await response.text();
@@ -108,6 +115,8 @@ async function requestJson(url: string, init: RequestInit): Promise<Record<strin
       if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt + 1 >= maxAttempts) throw requestError;
       await sleep(retryDelay(response, attempt));
     } catch (error) {
+      // 用户主动取消不是故障：不要重试，也不要报成超时或网络错误。
+      if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
       if (isRecord(error) && error.name === "AbortError") {
         lastError = new Error("模型请求超时，请检查网络或 Base URL");
       } else if (error instanceof TypeError) {
@@ -122,6 +131,7 @@ async function requestJson(url: string, init: RequestInit): Promise<Record<strin
       await sleep(Math.min(4_000, 1_000 * 2 ** attempt));
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortFromCaller);
     }
   }
   throw lastError instanceof Error ? lastError : new Error("模型请求失败");
@@ -170,7 +180,7 @@ async function callOpenAi(
         tool_choice: "auto",
       } : {}),
     }),
-  });
+  }, options?.signal);
   const choice = isRecord(data.choices?.[0]) ? data.choices[0] : {};
   const message = choice.message ?? {};
   const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason : "";
@@ -197,6 +207,47 @@ async function callOpenAi(
     }
   }
   return { content, toolCalls };
+}
+
+/**
+ * 新版 OpenAI Responses API（POST /responses）。
+ * 与 chat/completions 的差异：系统提示走 instructions，历史消息是扁平 input 条目，
+ * 工具结果用 function_call_output 按 call_id 配对，输出上限字段是 max_output_tokens。
+ */
+async function callOpenAiResponses(
+  selection: ModelSelection,
+  messages: AgentMessage[],
+  tools: AgentToolDefinition[],
+  options?: ModelCallOptions,
+): Promise<ModelTurn> {
+  const maxOutputTokens = resolveOutputTokens(selection, options);
+  const instructions = messages.filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const data = await requestJson(`${normalizeBaseUrl(selection.provider.baseUrl)}/responses`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${selection.apiKey}`,
+    },
+    body: JSON.stringify(buildResponsesRequestBody({
+      modelId: selection.model.modelId,
+      instructions,
+      temperature: selection.model.temperature,
+      maxOutputTokens,
+      tools,
+      messages,
+    })),
+  }, options?.signal);
+  const turn = parseResponsesTurn(data);
+  if (turn.failureMessage) throw new Error(`模型服务返回失败：${turn.failureMessage}`);
+  if (!turn.content.trim() && !turn.toolCalls.length) {
+    if (turn.incompleteReason === "max_output_tokens") {
+      throw new Error(`模型在返回正文前就用完了 ${maxOutputTokens} 个输出 Token（incomplete_details.reason=max_output_tokens）。思考型模型的推理过程也计入这个上限，请在“设置 → 模型与供应商”调高最大输出 Token 数，或换用非思考模型。`);
+    }
+    if (turn.incompleteReason) throw new Error(`模型没有返回内容（incomplete_details.reason=${turn.incompleteReason}）`);
+  }
+  return { content: turn.content, toolCalls: turn.toolCalls };
 }
 
 function toGeminiSchema(value: unknown): unknown {
@@ -277,7 +328,7 @@ async function callGemini(
         maxOutputTokens,
       },
     }),
-  });
+  }, options?.signal);
   const parts: any[] = data.candidates?.[0]?.content?.parts ?? [];
   const finishReason = String(data.candidates?.[0]?.finishReason ?? "");
   if (!parts.length) {
@@ -352,7 +403,7 @@ async function callAnthropic(
         tools: tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })),
       } : {}),
     }),
-  });
+  }, options?.signal);
   const blocks: any[] = data.content ?? [];
   const content = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
   const toolCalls = blocks.filter((block) => block.type === "tool_use").map((block) => ({
@@ -367,6 +418,8 @@ async function callAnthropic(
 export interface ModelCallOptions {
   /** 保证本次请求至少有这么多输出 Token。用于结构上必须长输出的步骤（例如文风汇总），不会低于用户自己配置的上限。 */
   minOutputTokens?: number;
+  /** 外部取消信号：中止时立刻打断在途请求，并以"已取消"结束，不重试。 */
+  signal?: AbortSignal;
 }
 
 function resolveOutputTokens(selection: ModelSelection, options?: ModelCallOptions): number {
@@ -383,5 +436,6 @@ export function callModel(
 ): Promise<ModelTurn> {
   if (selection.provider.type === "google-genai") return callGemini(selection, messages, tools, options);
   if (selection.provider.type === "anthropic") return callAnthropic(selection, messages, tools, options);
+  if (selection.provider.apiMode === "responses") return callOpenAiResponses(selection, messages, tools, options);
   return callOpenAi(selection, messages, tools, options);
 }

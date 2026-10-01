@@ -3,10 +3,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useNavigation } from "@react-navigation/native";
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Button, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
+  deleteModel,
   deleteProvider,
   getProviderApiKey,
   getSetting,
@@ -22,13 +23,18 @@ import type { RootStackParamList } from "@/navigation/types";
 import { SettingsCategoryScreen, type SettingsCategory } from "@/screens/settings-category-screen";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
-import type { Model, Provider, ProviderType } from "@/types";
+import type { Model, OpenAiApiMode, Provider, ProviderType } from "@/types";
 
 const providerDefaults: Record<ProviderType, { name: string; url: string }> = {
   "openai-compatible": { name: "OpenAI Compatible", url: "https://api.openai.com/v1" },
   "google-genai": { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta" },
   anthropic: { name: "Anthropic", url: "https://api.anthropic.com/v1" },
 };
+
+const OPENAI_API_MODES: Array<{ id: OpenAiApiMode; label: string; hint: string }> = [
+  { id: "chat-completions", label: "Chat Completions", hint: "POST /chat/completions，兼容性最好" },
+  { id: "responses", label: "Responses", hint: "POST /responses，OpenAI 新接口" },
+];
 
 const settingsCategories: Array<{
   id: SettingsCategory;
@@ -59,6 +65,7 @@ export function SettingsScreen() {
   const [providerName, setProviderName] = useState(providerDefaults["openai-compatible"].name);
   const [baseUrl, setBaseUrl] = useState(providerDefaults["openai-compatible"].url);
   const [apiKey, setApiKey] = useState("");
+  const [apiMode, setApiMode] = useState<OpenAiApiMode>("chat-completions");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [modelName, setModelName] = useState("");
   const [modelId, setModelId] = useState("");
@@ -70,6 +77,18 @@ export function SettingsScreen() {
   const [modelPickerProvider, setModelPickerProvider] = useState<Provider | null>(null);
   const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
   const [modelFilter, setModelFilter] = useState("");
+  const [addingRemoteModelId, setAddingRemoteModelId] = useState<string | null>(null);
+  const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [editProviderName, setEditProviderName] = useState("");
+  const [editProviderUrl, setEditProviderUrl] = useState("");
+  const [editProviderApiMode, setEditProviderApiMode] = useState<OpenAiApiMode>("chat-completions");
+  const [editProviderKey, setEditProviderKey] = useState("");
+  const [savingProviderEdit, setSavingProviderEdit] = useState(false);
+  const [editingModel, setEditingModel] = useState<Model | null>(null);
+  const [editModelName, setEditModelName] = useState("");
+  const [editModelTemperature, setEditModelTemperature] = useState("0.8");
+  const [editModelMaxTokens, setEditModelMaxTokens] = useState(String(DEFAULT_MAX_OUTPUT_TOKENS));
+  const [savingModelEdit, setSavingModelEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
 
@@ -103,6 +122,7 @@ export function SettingsScreen() {
     setProviderType(type);
     setProviderName(providerDefaults[type].name);
     setBaseUrl(providerDefaults[type].url);
+    setApiMode("chat-completions");
   };
 
   const addProvider = async () => {
@@ -110,7 +130,7 @@ export function SettingsScreen() {
     setSaving(true);
     setError(null);
     try {
-      const provider = await saveProvider({ name: providerName, type: providerType, baseUrl, apiKey });
+      const provider = await saveProvider({ name: providerName, type: providerType, baseUrl, apiKey, apiMode });
       setApiKey("");
       setSelectedProviderId(provider.id);
       refreshData();
@@ -191,13 +211,144 @@ export function SettingsScreen() {
     }
   };
 
-  const chooseRemoteModel = (model: RemoteModel) => {
+  // 一键添加用的参数：优先用“添加模型”表单里已经填好的温度/Token，非法或没填就用默认值，
+  // 这样从模型列表点一下即可入库，不必再滚到页面底部按“添加模型”。
+  const modelParams = (): { temperature: number; maxTokens: number } => {
+    const parsedTemperature = Number(temperature);
+    const parsedMaxTokens = Number(maxTokens);
+    return {
+      temperature: Number.isFinite(parsedTemperature) && parsedTemperature >= 0 && parsedTemperature <= 2
+        ? parsedTemperature
+        : 0.8,
+      maxTokens: Number.isInteger(parsedMaxTokens) && parsedMaxTokens >= 1 && parsedMaxTokens <= MAX_CONFIGURED_OUTPUT_TOKENS
+        ? parsedMaxTokens
+        : DEFAULT_MAX_OUTPUT_TOKENS,
+    };
+  };
+
+  const addRemoteModel = async (remote: RemoteModel) => {
     if (!modelPickerProvider) return;
-    setSelectedProviderId(modelPickerProvider.id);
-    setModelName(model.name);
-    setModelId(model.id);
-    setModelFilter("");
-    setModelPickerProvider(null);
+    setAddingRemoteModelId(remote.id);
+    setError(null);
+    try {
+      const model = await saveModel({
+        providerId: modelPickerProvider.id,
+        name: remote.name,
+        modelId: remote.id,
+        ...modelParams(),
+      });
+      if (!activeModelId) {
+        await setSetting("activeModelId", model.id);
+        setActiveModelId(model.id);
+      }
+      // 只刷新模型列表：弹层留在原地，可以接着加下一个，已添加的条目标成“已添加”。
+      setModels(await listModels());
+      refreshData();
+    } catch (addError) {
+      setError(addError instanceof Error ? addError.message : String(addError));
+    } finally {
+      setAddingRemoteModelId(null);
+    }
+  };
+
+  const addedRemoteModelIds = useMemo(() => new Set(
+    models.filter((model) => model.providerId === modelPickerProvider?.id).map((model) => model.modelId),
+  ), [models, modelPickerProvider]);
+
+  const openProviderEdit = (provider: Provider) => {
+    setEditingProvider(provider);
+    setEditProviderName(provider.name);
+    setEditProviderUrl(provider.baseUrl);
+    setEditProviderApiMode(provider.apiMode);
+    setEditProviderKey("");
+    setError(null);
+  };
+
+  const saveProviderEdit = async () => {
+    if (!editingProvider || !editProviderName.trim() || !editProviderUrl.trim()) return;
+    setSavingProviderEdit(true);
+    setError(null);
+    try {
+      await saveProvider({
+        id: editingProvider.id,
+        name: editProviderName,
+        type: editingProvider.type,
+        baseUrl: editProviderUrl,
+        apiKey: editProviderKey,
+        apiMode: editProviderApiMode,
+      });
+      setEditingProvider(null);
+      await load();
+      refreshData();
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : String(editError));
+    } finally {
+      setSavingProviderEdit(false);
+    }
+  };
+
+  const openModelEdit = (model: Model) => {
+    setEditingModel(model);
+    setEditModelName(model.name);
+    setEditModelTemperature(String(model.temperature));
+    setEditModelMaxTokens(String(model.maxTokens));
+    setError(null);
+  };
+
+  const saveModelEdit = async () => {
+    if (!editingModel || !editModelName.trim()) return;
+    const parsedTemperature = Number(editModelTemperature);
+    const parsedMaxTokens = Number(editModelMaxTokens);
+    if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
+      setError("温度必须在 0 到 2 之间");
+      return;
+    }
+    if (!Number.isInteger(parsedMaxTokens) || parsedMaxTokens < 1 || parsedMaxTokens > MAX_CONFIGURED_OUTPUT_TOKENS) {
+      setError(`最大输出 Token 数必须在 1 到 ${MAX_CONFIGURED_OUTPUT_TOKENS} 之间`);
+      return;
+    }
+    setSavingModelEdit(true);
+    setError(null);
+    try {
+      await saveModel({
+        id: editingModel.id,
+        providerId: editingModel.providerId,
+        name: editModelName,
+        modelId: editingModel.modelId,
+        temperature: parsedTemperature,
+        maxTokens: parsedMaxTokens,
+      });
+      setEditingModel(null);
+      setModels(await listModels());
+      refreshData();
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : String(editError));
+    } finally {
+      setSavingModelEdit(false);
+    }
+  };
+
+  const removeModel = async (model: Model) => {
+    setError(null);
+    try {
+      await deleteModel(model);
+      setModels(await listModels());
+      if (activeModelId === model.id) setActiveModelId(null);
+      refreshData();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    }
+  };
+
+  const confirmDeleteModel = (model: Model) => {
+    Alert.alert(
+      "删除模型",
+      `删除「${model.name}」（${model.modelId}）？默认模型指向它时会一并清空这个选择，供应商本身保留。`,
+      [
+        { text: "取消", style: "cancel" },
+        { text: "删除", style: "destructive", onPress: () => void removeModel(model) },
+      ],
+    );
   };
 
   // 中转站常常返回几百个模型，按名称和 ID 做不区分大小写的子串过滤。
@@ -253,6 +404,21 @@ export function SettingsScreen() {
         </View>
         <Field label="显示名称" value={providerName} onChangeText={setProviderName} />
         <Field label="Base URL" value={baseUrl} onChangeText={setBaseUrl} autoCapitalize="none" keyboardType="url" />
+        {providerType === "openai-compatible" ? (
+          <>
+            <Text style={styles.fieldLabel}>接口</Text>
+            <View style={styles.segmented}>
+              {OPENAI_API_MODES.map((mode) => (
+                <Pressable key={mode.id} onPress={() => setApiMode(mode.id)} style={[styles.segment, apiMode === mode.id && styles.segmentActive]}>
+                  <Text style={[styles.segmentText, apiMode === mode.id && styles.segmentTextActive]}>{mode.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.fieldHint}>
+              {OPENAI_API_MODES.find((mode) => mode.id === apiMode)?.hint}；中转站大多只实现旧接口，选错会直接报 404。
+            </Text>
+          </>
+        ) : null}
         <Field label="API Key" value={apiKey} onChangeText={setApiKey} autoCapitalize="none" secureTextEntry />
         <Button label="保存供应商" onPress={() => void addProvider()} disabled={!providerName.trim() || !baseUrl.trim() || !apiKey.trim()} loading={saving} />
       </View>
@@ -262,7 +428,12 @@ export function SettingsScreen() {
           <View style={styles.providerHeader}>
             <View style={styles.providerInfo}>
               <Text style={styles.providerName}>{provider.name}</Text>
-              <Text style={styles.providerUrl} numberOfLines={1}>{provider.baseUrl}</Text>
+              <Text style={styles.providerUrl} numberOfLines={1}>
+                {provider.baseUrl}
+                {provider.type === "openai-compatible"
+                  ? ` · ${provider.apiMode === "responses" ? "Responses API" : "Chat Completions"}`
+                  : ""}
+              </Text>
             </View>
             <View style={styles.providerActions}>
               <Pressable
@@ -276,6 +447,9 @@ export function SettingsScreen() {
                   : <Ionicons name="cloud-download-outline" size={18} color={colors.primary} />}
                 <Text style={styles.fetchButtonText}>获取模型</Text>
               </Pressable>
+              <Pressable accessibilityLabel="编辑供应商" onPress={() => openProviderEdit(provider)} style={styles.iconButton}>
+                <Ionicons name="create-outline" size={20} color={colors.text} />
+              </Pressable>
               <Pressable accessibilityLabel="删除供应商" onPress={() => {
                 Alert.alert("删除供应商", `删除 ${provider.name} 及其全部模型？`, [
                   { text: "取消", style: "cancel" },
@@ -285,13 +459,21 @@ export function SettingsScreen() {
             </View>
           </View>
           {(modelsByProvider.get(provider.id) ?? []).map((model) => (
-            <Pressable key={model.id} onPress={() => void selectModel(model)} style={styles.modelRow}>
-              <Ionicons name={activeModelId === model.id ? "radio-button-on" : "radio-button-off"} size={20} color={activeModelId === model.id ? colors.primary : colors.textMuted} />
-              <View style={styles.modelText}>
-                <Text style={styles.modelName}>{model.name}</Text>
-                <Text style={styles.modelId}>{model.modelId}</Text>
-              </View>
-            </Pressable>
+            <View key={model.id} style={styles.modelRow}>
+              <Pressable accessibilityLabel={`把 ${model.name} 设为默认模型`} onPress={() => void selectModel(model)} style={styles.modelSelect}>
+                <Ionicons name={activeModelId === model.id ? "radio-button-on" : "radio-button-off"} size={20} color={activeModelId === model.id ? colors.primary : colors.textMuted} />
+                <View style={styles.modelText}>
+                  <Text style={styles.modelName}>{model.name}</Text>
+                  <Text style={styles.modelId}>{model.modelId} · 温度 {model.temperature} · 输出上限 {model.maxTokens}</Text>
+                </View>
+              </Pressable>
+              <Pressable accessibilityLabel={`编辑 ${model.name}`} onPress={() => openModelEdit(model)} style={styles.modelIconAction}>
+                <Ionicons name="options-outline" size={19} color={colors.textMuted} />
+              </Pressable>
+              <Pressable accessibilityLabel={`删除 ${model.name}`} onPress={() => confirmDeleteModel(model)} style={styles.modelIconAction}>
+                <Ionicons name="trash-outline" size={19} color={colors.danger} />
+              </Pressable>
+            </View>
           ))}
         </View>
       ))}
@@ -327,7 +509,7 @@ export function SettingsScreen() {
                 <Text style={styles.providerUrl}>
                   {modelFilter.trim()
                     ? `${filteredRemoteModels.length} / ${remoteModels.length} 个模型`
-                    : `${remoteModels.length} 个可用模型`}
+                    : `${remoteModels.length} 个可用模型 · 点一下即添加`}
                 </Text>
               </View>
               <Pressable accessibilityLabel="关闭模型列表" onPress={() => setModelPickerProvider(null)} style={styles.iconButton}>
@@ -343,6 +525,9 @@ export function SettingsScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+              <Text style={styles.fieldHint}>
+                点一条就加进该供应商，窗口不会关，可以连续添加；参数取“添加模型”里的温度与最大输出 Token，需要单独调再加完点模型行的设置图标。
+              </Text>
             </View>
             <FlatList
               data={filteredRemoteModels}
@@ -353,16 +538,94 @@ export function SettingsScreen() {
                   {remoteModels.length ? `没有匹配“${modelFilter.trim()}”的模型` : "还没有获取到模型列表"}
                 </Text>
               )}
-              renderItem={({ item }) => (
-                <Pressable onPress={() => chooseRemoteModel(item)} style={styles.remoteModelRow}>
-                  <View style={styles.modelText}>
-                    <Text style={styles.modelName}>{item.name}</Text>
-                    <Text style={styles.modelId}>{item.id}</Text>
-                  </View>
-                  <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
-                </Pressable>
-              )}
+              renderItem={({ item }) => {
+                const added = addedRemoteModelIds.has(item.id);
+                const adding = addingRemoteModelId === item.id;
+                return (
+                  <Pressable
+                    disabled={added || adding}
+                    onPress={() => void addRemoteModel(item)}
+                    style={styles.remoteModelRow}
+                  >
+                    <View style={styles.modelText}>
+                      <Text style={styles.modelName}>{item.name}</Text>
+                      <Text style={styles.modelId}>{item.id}</Text>
+                    </View>
+                    {adding
+                      ? <ActivityIndicator size="small" color={colors.primary} />
+                      : added
+                        ? <Text style={styles.addedTag}>已添加</Text>
+                        : <Ionicons name="add-circle-outline" size={22} color={colors.primary} />}
+                  </Pressable>
+                );
+              }}
             />
+          </View>
+        </SheetBackdrop>
+      </Modal>
+
+      <Modal visible={editingProvider !== null} transparent animationType="slide" onRequestClose={() => setEditingProvider(null)}>
+        <SheetBackdrop onPress={() => setEditingProvider(null)}>
+          <View style={styles.modelSheet}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.providerInfo}>
+                <Text style={styles.sectionTitle}>编辑供应商</Text>
+                <Text style={styles.providerUrl}>
+                  {editingProvider?.type === "openai-compatible" ? "OpenAI 兼容" : editingProvider?.type === "google-genai" ? "Google Gemini" : "Anthropic"}；类型不可改，需要别的类型请新建供应商。
+                </Text>
+              </View>
+              <Pressable accessibilityLabel="关闭编辑供应商" onPress={() => setEditingProvider(null)} style={styles.iconButton}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.editSheetBody} keyboardShouldPersistTaps="handled">
+              <Field label="显示名称" value={editProviderName} onChangeText={setEditProviderName} />
+              <Field label="Base URL" value={editProviderUrl} onChangeText={setEditProviderUrl} autoCapitalize="none" keyboardType="url" />
+              {editingProvider?.type === "openai-compatible" ? (
+                <>
+                  <Text style={styles.fieldLabel}>接口</Text>
+                  <View style={styles.segmented}>
+                    {OPENAI_API_MODES.map((mode) => (
+                      <Pressable
+                        key={mode.id}
+                        onPress={() => setEditProviderApiMode(mode.id)}
+                        style={[styles.segment, editProviderApiMode === mode.id && styles.segmentActive]}
+                      >
+                        <Text style={[styles.segmentText, editProviderApiMode === mode.id && styles.segmentTextActive]}>{mode.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.fieldHint}>
+                    {OPENAI_API_MODES.find((mode) => mode.id === editProviderApiMode)?.hint}；中转站大多只实现旧接口，选错会直接报 404。
+                  </Text>
+                </>
+              ) : null}
+              <Field label="API Key（留空保持原值）" value={editProviderKey} onChangeText={setEditProviderKey} autoCapitalize="none" secureTextEntry placeholder="不修改就留空" />
+              <Button label="保存修改" onPress={() => void saveProviderEdit()} disabled={!editProviderName.trim() || !editProviderUrl.trim()} loading={savingProviderEdit} />
+            </ScrollView>
+          </View>
+        </SheetBackdrop>
+      </Modal>
+
+      <Modal visible={editingModel !== null} transparent animationType="slide" onRequestClose={() => setEditingModel(null)}>
+        <SheetBackdrop onPress={() => setEditingModel(null)}>
+          <View style={styles.modelSheet}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.providerInfo}>
+                <Text style={styles.sectionTitle}>编辑模型</Text>
+                <Text style={styles.providerUrl} numberOfLines={1}>{editingModel?.modelId}</Text>
+              </View>
+              <Pressable accessibilityLabel="关闭编辑模型" onPress={() => setEditingModel(null)} style={styles.iconButton}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.editSheetBody} keyboardShouldPersistTaps="handled">
+              <Field label="模型名称" value={editModelName} onChangeText={setEditModelName} />
+              <Field label="温度" value={editModelTemperature} onChangeText={setEditModelTemperature} keyboardType="decimal-pad" />
+              <Field label="最大输出 Token 数" value={editModelMaxTokens} onChangeText={setEditModelMaxTokens} keyboardType="number-pad" />
+              <Text style={styles.fieldHint}>模型 ID 不可改；单次回复长度上限、不是上下文窗口，最高 {MAX_CONFIGURED_OUTPUT_TOKENS}。</Text>
+              <Button label="保存修改" onPress={() => void saveModelEdit()} disabled={!editModelName.trim()} loading={savingModelEdit} />
+            </ScrollView>
           </View>
         </SheetBackdrop>
       </Modal>
@@ -393,7 +656,12 @@ const styles = StyleSheet.create({
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   fetchButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm },
   fetchButtonText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
-  modelRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
+  modelRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: spacing.sm },
+  modelSelect: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs },
+  modelIconAction: { width: 40, height: 44, alignItems: "center", justifyContent: "center" },
+  addedTag: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
+  fieldLabel: { color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: -spacing.sm },
+  editSheetBody: { gap: spacing.md, padding: spacing.lg, paddingBottom: spacing.xxl },
   modelText: { flex: 1 },
   modelName: { color: colors.text, fontSize: 15, fontWeight: "600" },
   modelId: { color: colors.textMuted, fontSize: 12, marginTop: 2 },

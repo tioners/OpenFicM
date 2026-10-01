@@ -67,6 +67,13 @@ async function migrateChatSessions(database: SQLite.SQLiteDatabase): Promise<voi
   }
 }
 
+async function migrateProviders(database: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await database.getAllAsync<{ name: string }>("PRAGMA table_info(providers)");
+  if (columns.some((column) => column.name === "api_mode")) return;
+  // 旧库默认按 chat/completions 调用，用户可在“模型与供应商”里逐个改成 Responses。
+  await database.execAsync("ALTER TABLE providers ADD COLUMN api_mode TEXT NOT NULL DEFAULT 'chat-completions';");
+}
+
 async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
@@ -149,6 +156,7 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       base_url TEXT NOT NULL,
+      api_mode TEXT NOT NULL DEFAULT 'chat-completions',
       api_key_ref TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -359,6 +367,7 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     UPDATE style_profiles SET version = 1 WHERE kind = 'reference' AND version <> 1;
   `);
   await migrateChatSessions(database);
+  await migrateProviders(database);
 }
 
 export function getDatabase(): Promise<SQLite.SQLiteDatabase> {

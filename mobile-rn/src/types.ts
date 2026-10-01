@@ -1,5 +1,8 @@
 export type ProviderType = "openai-compatible" | "google-genai" | "anthropic";
 
+/** OpenAI 风格供应商的接口：chat/completions 是沿用接口，responses 是新的 Responses API。 */
+export type OpenAiApiMode = "chat-completions" | "responses";
+
 export interface Project {
   id: string;
   title: string;
@@ -89,6 +92,7 @@ export interface Provider {
   name: string;
   type: ProviderType;
   baseUrl: string;
+  apiMode: OpenAiApiMode;
   apiKeyRef: string;
   createdAt: string;
 }
