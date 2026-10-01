@@ -19,7 +19,7 @@ GitHub 仓库：
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
-仓库是从上游 OpenFic clone 出来的，本地继承了上游全部 Git 标签（v0.2.0 到 v0.10.0）。这些标签指向 syrizelink 的提交，不是 OpenFicM 的发布点。打新版本标签前必须先确认同名标签是否已被上游占用，否则会像 v0.7.3 那样把 Release 挂到上游代码上。v0.7.3 的 Release 页面因此指向上游提交 7ea4437，APK 资产本身是正确的；该版本已由 0.7.4 取代，不再修复。
+仓库是从上游 OpenFic clone 出来的，历史上继承了上游全部 Git 标签（v0.2.0 到 v0.10.0），这些标签指向 syrizelink 的提交，不是 OpenFicM 的发布点。2026-10-02 已按"轻量标签 + `chore(main): release` 主题"精确识别并删除 31 个上游遗留标签（v0.2.0 到 v0.6.2、v0.7.1 到 v0.7.3、v0.9.1、v0.9.2、v0.10.0），本地只保留 OpenFicM 自己的注释标签；相关提交仍在 main 历史里，需要时用 `git tag <版本> <sha>` 即可恢复。远端仍留有 v0.7.1（指向你自己的 ec0220f）和 v0.7.3（指向上游 7ea4437），`git fetch --tags` 会把这两个拉回本地；打新版本标签前仍要先确认本地是否已有同名标签，否则会像 v0.7.3 那样把 Release 挂到上游代码上。v0.7.3 的 Release 页面因此指向上游提交，APK 资产本身是正确的；该版本已由 0.7.4 取代，不再修复。
 
 ## 2. 当前交付状态
 
@@ -230,19 +230,19 @@ $env:https_proxy = "http://127.0.0.1:10808"
 git push origin main
 ~~~
 
-正式 Release 使用 GitHub CLI。打标签前必须先确认本地没有同名标签：标签表里仍残留上游 OpenFic（Syrize）的 release-please 标签（`v0.9.0`、`v0.9.1`、`v0.9.2`、`v0.10.0`，以及已被 OpenFicM 覆盖过的若干版本）。`git tag -a` 遇到同名标签会直接失败，此时 `git push origin <tag>` 会把那个上游标签推上去，Release 就会指向无关的上游提交——0.8.1 发布时正是这样踩到的，删掉标签重新打才修好。注释标签与 0.7.4 起的做法保持一致：
+正式 Release 使用 GitHub CLI。打标签前必须先确认本地没有同名标签：上游 OpenFic（Syrize）的 release-please 标签已在 2026-10-02 清理（见第 1 节），但 `git fetch --tags` 可能把远端仍有的 v0.7.1/v0.7.3 拉回来，与上游仓库同步过标签时也可能再次引入。`git tag -a` 遇到同名标签会直接失败，此时 `git push origin <tag>` 会把那个上游标签推上去，Release 就会指向无关的上游提交——0.8.1 和 0.9.0 发布时都踩到过，删掉标签重新打才修好。注释标签与 0.7.4 起的做法保持一致：
 
 ~~~powershell
-git for-each-ref refs/tags/v0.8.1        # 先看是否已有同名标签
-git tag -d v0.8.1                        # 有上游遗留标签时先删除
-git tag -a v0.8.1 -m "OpenFicM 0.8.1"
-git push origin v0.8.1
-gh release create v0.8.1 .\OpenFicM-Android-0.8.1.apk --repo tioners/OpenFicM --title "OpenFicM 0.8.1" --notes-file docs/releases/v0.8.1.md --verify-tag
+git for-each-ref refs/tags/v0.9.0        # 先看是否已有同名标签
+git tag -d v0.9.0                        # 有上游遗留标签时先删除
+git tag -a v0.9.0 -m "OpenFicM 0.9.0"
+git push origin v0.9.0
+gh release create v0.9.0 .\OpenFicM-Android-0.9.0.apk --repo tioners/OpenFicM --title "OpenFicM 0.9.0" --notes-file docs/releases/v0.9.0.md --verify-tag
 ~~~
 
-不加 `--latest`：GitHub 会把最新发布的非草稿非预发布版本自动标为 latest，`/releases/latest` 已确认返回 v0.8.1。
+不加 `--latest`：GitHub 会把最新发布的非草稿非预发布版本自动标为 latest，`/releases/latest` 已确认返回 v0.9.0。
 
-不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.8.0 和 gh release list 验证标签及资产。
+不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.9.0 和 gh release list 验证标签及资产。
 
 ## 8. 已知限制和后续重点
 
