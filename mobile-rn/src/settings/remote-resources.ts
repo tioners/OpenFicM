@@ -14,12 +14,14 @@ import {
 const OPENFICM_CATALOG_KEY = "content.openficm.catalog.v1";
 const LORN_PACKAGE_KEY = "content.lornStyle.package.v1";
 const MODEL_VERIFICATION_PREFIX = "resources.localModel.verified.";
-const OPENFICM_CONTENT_COMMIT = "1a848fbe77f9952c38aac8c18240026154446114";
+// 同一个固定提交同时提供 Agent 目录和 Lorn 移动端目录；改动任一内容包都必须
+// 同步更新它下面的两处 SHA-256，否则全新安装会在资源门处从头就校验失败。
+const OPENFICM_CONTENT_COMMIT = "186e7b0f04a7b183161784262c3259d6b42785ea";
 const OPENFICM_CATALOG_URL = `https://raw.githubusercontent.com/tioners/OpenFicM/${OPENFICM_CONTENT_COMMIT}/resources/openficm-agent-catalog.json`;
-const OPENFICM_CATALOG_SHA256 = "3a186be06211eb659c81f5b1dc77ed65566fd4f295577acc540eb51ef3af17ef";
+const OPENFICM_CATALOG_SHA256 = "66b6c8ab5b70c8ffff7c44d42e842a33e1fee4b6dc3cb49f731d0739699611fb";
 const OPENFICM_CATALOG_MAX_BYTES = 750_000;
 const LORN_MOBILE_CATALOG_URL = `https://raw.githubusercontent.com/tioners/OpenFicM/${OPENFICM_CONTENT_COMMIT}/plugins/lorn-style-evolution/mobile-catalog.json`;
-const LORN_MOBILE_CATALOG_SHA256 = "c4941dae92e2af7c58a016e9bf5204dacecf17a442f361e1b07875f43967433d";
+const LORN_MOBILE_CATALOG_SHA256 = "9c351e6715c60eafba20784991edfbb6bd1497bb1106dc05cef575463d52a1d2";
 const LORN_REPOSITORY = "lornshrimp/Lorn.NovelWriteSkills";
 const LORN_COMMIT = "5acd34586d5d241193bd36ceed9341f7f482ea3b";
 const REQUEST_TIMEOUT_MS = 45_000;
