@@ -19,7 +19,7 @@ GitHub 仓库：
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
-仓库是从上游 OpenFic clone 出来的，历史上继承了上游全部 Git 标签（v0.2.0 到 v0.10.0），这些标签指向 syrizelink 的提交，不是 OpenFicM 的发布点。2026-10-02 已按"轻量标签 + `chore(main): release` 主题"精确识别并删除 31 个上游遗留标签（v0.2.0 到 v0.6.2、v0.7.1 到 v0.7.3、v0.9.1、v0.9.2、v0.10.0），本地只保留 OpenFicM 自己的注释标签；相关提交仍在 main 历史里，需要时用 `git tag <版本> <sha>` 即可恢复。远端仍留有 v0.7.1（指向你自己的 ec0220f）和 v0.7.3（指向上游 7ea4437），`git fetch --tags` 会把这两个拉回本地；打新版本标签前仍要先确认本地是否已有同名标签，否则会像 v0.7.3 那样把 Release 挂到上游代码上。v0.7.3 的 Release 页面因此指向上游提交，APK 资产本身是正确的；该版本已由 0.7.4 取代，不再修复。
+仓库是从上游 OpenFic clone 出来的，历史上继承了上游全部 Git 标签（v0.2.0 到 v0.10.0），这些标签指向 syrizelink 的提交，不是 OpenFicM 的发布点。2026-10-02 已按"轻量标签 + `chore(main): release` 主题"精确识别并删除 31 个上游遗留标签（v0.2.0 到 v0.6.2、v0.7.1 到 v0.7.3、v0.9.1、v0.9.2、v0.10.0），本地只保留 OpenFicM 自己的注释标签；相关提交仍在 main 历史里，需要时用 `git tag <版本> <sha>` 即可恢复。远端仍留有 v0.5.0、v0.6.0、v0.7.1（都指向你自己的提交）与 v0.7.3（指向上游 7ea4437），`git fetch --tags` 会把它们拉回本地；打新版本标签前仍要先确认本地是否已有同名标签，否则会像 v0.7.3 那样把 Release 挂到上游代码上。v0.7.3 的 Release 页面因此指向上游提交，APK 资产本身是正确的；该版本已由 0.7.4 取代，不再修复。
 
 ## 2. 当前交付状态
 
@@ -230,7 +230,7 @@ $env:https_proxy = "http://127.0.0.1:10808"
 git push origin main
 ~~~
 
-正式 Release 使用 GitHub CLI。打标签前必须先确认本地没有同名标签：上游 OpenFic（Syrize）的 release-please 标签已在 2026-10-02 清理（见第 1 节），但 `git fetch --tags` 可能把远端仍有的 v0.7.1/v0.7.3 拉回来，与上游仓库同步过标签时也可能再次引入。`git tag -a` 遇到同名标签会直接失败，此时 `git push origin <tag>` 会把那个上游标签推上去，Release 就会指向无关的上游提交——0.8.1 和 0.9.0 发布时都踩到过，删掉标签重新打才修好。注释标签与 0.7.4 起的做法保持一致：
+正式 Release 使用 GitHub CLI。打标签前必须先确认本地没有同名标签：上游 OpenFic（Syrize）的 release-please 标签已在 2026-10-02 清理（见第 1 节），但 `git fetch --tags` 会把远端仍有的 v0.5.0、v0.6.0、v0.7.1、v0.7.3 拉回来（前三个指向你自己的提交，v0.7.3 仍指向上游代码），与上游仓库同步过标签时也可能再次引入。`git tag -a` 遇到同名标签会直接失败，此时 `git push origin <tag>` 会把那个上游标签推上去，Release 就会指向无关的上游提交——0.8.1 和 0.9.0 发布时都踩到过，删掉标签重新打才修好。注释标签与 0.7.4 起的做法保持一致：
 
 ~~~powershell
 git for-each-ref refs/tags/v0.9.0        # 先看是否已有同名标签
