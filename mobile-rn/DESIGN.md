@@ -14,7 +14,7 @@
 
 应用本身没有本地 HTTP 服务，也没有 Socket.IO 连接。网络请求只由模型客户端发往用户配置的 Base URL。Base URL 和 API Key 都在调用前经过校验；模型响应按 HTTP 状态和 JSON 格式处理，并设置 120 秒超时。
 
-运行资源下载是显式网络入口：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变 commit `1a848fbe77f9952c38aac8c18240026154446114` 并校验固定 SHA-256，oh-story 通过正式 Release 获取，Lorn 原版蒸馏 Skill 绑定固定 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`，两个 GGUF 模型从固定 Hugging Face 仓库获取。所有下载都限制大小；模型写入 `.download` 临时文件，完成大小和 SHA-256 校验后才移动到正式路径。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
+运行资源下载是显式网络入口：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变 commit `186e7b0f04a7b183161784262c3259d6b42785ea` 并校验固定 SHA-256，oh-story 通过正式 Release 获取，Lorn 原版蒸馏 Skill 绑定固定 commit `5acd34586d5d241193bd36ceed9341f7f482ea3b`，两个 GGUF 模型从固定 Hugging Face 仓库获取。所有下载都限制大小；模型写入 `.download` 临时文件，完成大小和 SHA-256 校验后才移动到正式路径。远程仓库中的脚本、Hook、Git 配置、浏览器自动化与其他文件均不会下载或执行。
 
 ## 本地检索
 

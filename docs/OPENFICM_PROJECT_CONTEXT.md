@@ -142,7 +142,7 @@ backend、frontend、desktop 是保留的 OpenFic 上游源码和兼容修复，
 10. 输出截断不做静默降级：思考型模型的推理 Token 也计入 max_tokens，正文可能一个字都没返回。三个供应商分支都检查截断状态并抛出可操作的报错，不再让调用方只看到"内容为空"。
 11. 重试以当前选中的模型为准：失败消息里记录的 modelId 只作兜底，否则用户换了可用模型后仍会打回出错的旧模型。
 12. 应用版本读自 app.json，不引入 expo-constants 运行时依赖；该文件就是构建 APK 时使用的同一份配置。
-8. 供应链限制：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变提交 1a848fbe77f9952c38aac8c18240026154446114 并校验 SHA-256；oh-story 只按白名单读取 Markdown 并绑定 Release commit/tree/blob SHA，远程 Hook、脚本和 Git 配置不会执行。
+8. 供应链限制：OpenFicM 基础 catalog 与 Lorn 移动目录绑定不可变提交 186e7b0f04a7b183161784262c3259d6b42785ea 并校验 SHA-256；oh-story 只按白名单读取 Markdown 并绑定 Release commit/tree/blob SHA，远程 Hook、脚本和 Git 配置不会执行。
 9. 文风边界：参考书是全局本地资料，参考文风可跨作品，作者文风只属于单部作品；蒸馏只向用户供应商发送有界样本，完整原文件不上传。
 
 ## 6. 构建与验证
