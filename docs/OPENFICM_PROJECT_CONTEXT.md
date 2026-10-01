@@ -243,6 +243,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - 包内核对：新文案（“份同名参考文风，来自多次导入的不同文件”“只读预览”“还没有可选文风”）按 UTF-16LE 命中；旧内联选择器的专属文案“当前作品作者文风”“仅遵循作品设定和本轮要求”已消失，可确认两个页面都换成了共用组件。
 - 未做真机验证：选择器在真机上的排版（三行元信息 + 预览）、同名提示与“全文”预览都还只在代码与包级校验层面确认过。
 
+### 0.10.2 发布记录
+
+- 用户反馈：删掉参考书后参考文风还在，选择器里出现多条同名项（其中几条标注“参考书已删除”）。修复提交 `49135a2`。
+- 根因（已用 expo-sqlite 源码与影子库双向确认）：`withExclusiveTransactionAsync` 通过 `Transaction.createAsync` 用 `useNewConnection: true` **新开一条连接**执行事务（node_modules/expo-sqlite/src/SQLiteDatabase.ts:787），整包（JS 与 Android 源码）都没有设置过 `PRAGMA foreign_keys`，而它是连接级开关、SQLite 默认关闭。主连接上的 `PRAGMA foreign_keys = ON` 管不到这条新连接，于是独占事务里的 `ON DELETE CASCADE` / `SET NULL` 全部失效。
+- 影子库验证（外键显式关闭模拟那条连接）：旧 SQL 删参考书后留下 `style_profiles` 孤儿与悬空草稿引用；旧 SQL 删章节留下草稿与悬空的 `notes.chapter_id`；旧 SQL 删作品留下卷/章/草稿/笔记/角色/世界书/对话/向量块/作者文风共 12 类残留。新 SQL 全部清零，且保留 `__none__`、保留跨作品的参考文风。
+- 一致性修复验证：构造“健康数据 + 用户机器上的孤儿”混合库，一次执行后孤儿全清、健康数据未动、笔记按设计上浮（章级→卷级→整书级）、活跃选择只清悬空项、重复执行结果不变。
+- 静态检查：`npm run type-check` 与 `--noUnusedLocals --noUnusedParameters` 通过。
+- 构建：Gradle assembleRelease BUILD SUCCESSFUL（1m51s，无 GGUF）；apksigner v2 通过、证书仍为 `c5dd7c04…`；aapt2 报 versionCode 20、versionName 0.10.2、minSdk 28、仅 arm64-v8a。
+- Release 资产 `OpenFicM-Android-0.10.2.apk`，132,589,940 字节（126.45 MiB），SHA-256 `2BA81DC02C09101549B38108E1C81FA1EF73AE260CB12500F42B97EB59A0442B`。
+- 未做真机验证：升级后首次启动的清理结果（用户机器上那两条“参考书已删除”的文风应消失）、删参考书/卷/章/作品是否确实不留残留，都要在真机上确认一次。
+
 ## 7. 发布流程
 
 源码推送：
