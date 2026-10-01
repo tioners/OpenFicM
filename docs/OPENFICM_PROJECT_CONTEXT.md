@@ -220,6 +220,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - `assets/index.android.bundle` 里能查到 `saveReferenceStyleProfile`/`styleProfileLabel`，新文案（"重新开始蒸馏""参考文风已更新"）在、旧文案（"保存为 V""参考文风版本"）已消失。Hermes 包内中文以 UTF-16LE 存储，按 UTF-8 搜会全部落空。
 - 未做真机验证：升级后合并效果、续蒸是否就地更新、重新开始确认框都还只在代码与包级校验层面确认过。
 
+### 0.10.0 发布记录
+
+- 用户需求三条：蒸馏时界面被锁住要能后台继续；模型与供应商页要能选 OpenAI 新旧接口、获取模型后别再滚下去点保存、单个模型要能删。行为变更提交 `a5d0aad`。
+- 验证（Responses 映射）：`npx tsc --ignoreConfig src/llm/responses-api.ts` 转译后在 Node 跑断言——input 条目（含丢弃无 call_id 的工具结果）、请求体字段（instructions/input/max_output_tokens/tools，且不混入 max_tokens 与 system 消息）、reasoning 与 output_text 解析、function_call 的字符串/对象两种 arguments、截断与 error 分支，全部通过。
+- 验证（数据库）：影子 SQLite 库确认 providers 补列后旧行落到 `chat-completions`、重复执行跳过 ALTER、切换生效；deleteModel 只清指向被删模型的默认选择、只置空引用它的会话、供应商与其它模型不受影响、外键检查通过。
+- 静态检查：`npm run type-check` 通过；额外用 `--noUnusedLocals --noUnusedParameters` 确认无未使用代码与参数。
+- 构建：Gradle assembleRelease BUILD SUCCESSFUL（1m54s，无 GGUF 条目）；apksigner v2 通过、证书仍为 `c5dd7c04…`；aapt2 报 versionCode 18、versionName 0.10.0、minSdk 28、仅 arm64-v8a。
+- Release 资产 `OpenFicM-Android-0.10.0.apk`，132,574,080 字节（126.43 MiB），SHA-256 `5DF7A7DCA5D994F04489F4DBE127AD634178E67892257F84D8F27B86C6028AD2`。
+- 包内核对：中文文案（"正在蒸馏《""已取消本次请求""编辑供应商""点一条就加进该供应商"）按 UTF-16LE 命中，纯 ASCII（`/responses`、`max_output_tokens`、`function_call_output`、`incomplete_details`、`Responses API`）按 1 字节命中——Hermes 只对含非 ASCII 的串用 UTF-16，搜 APK 时两种编码都要试，否则会误判成"没打进包"。旧文案"正在保存参考文风版本"已消失。
+- 未做真机验证：后台蒸馏与取消、断点续跑、Responses 接口真实连通、模型一键添加/删除/改参数都还只在代码与包级校验层面确认过。
+
 ## 7. 发布流程
 
 源码推送：
