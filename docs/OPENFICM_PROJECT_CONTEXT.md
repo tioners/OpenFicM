@@ -231,6 +231,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - 包内核对：中文文案（"正在蒸馏《""已取消本次请求""编辑供应商""点一条就加进该供应商"）按 UTF-16LE 命中，纯 ASCII（`/responses`、`max_output_tokens`、`function_call_output`、`incomplete_details`、`Responses API`）按 1 字节命中——Hermes 只对含非 ASCII 的串用 UTF-16，搜 APK 时两种编码都要试，否则会误判成"没打进包"。旧文案"正在保存参考文风版本"已消失。
 - 未做真机验证：后台蒸馏与取消、断点续跑、Responses 接口真实连通、模型一键添加/删除/改参数都还只在代码与包级校验层面确认过。
 
+### 0.10.1 发布记录
+
+- 用户反馈：写作页选择文风时出现多条同名项，怀疑是没合并干净的 V1/V2/V3；且选择器不显示内容，无法判断是否同一份。修复提交 `009f27e`。
+- 排查结论（下次不必重复怀疑）：`listStyleProfiles` 直接返回数据库行，没有客户端拼接；`style_profiles` 自 0.7.4 引入，`series_id` 一直是 `reference-<sourceId>`（0.7.4/0.7.5/0.8.0/0.9.0 一致）；导入按文件字节 SHA-256 判重且 `style_sources.content_hash` 有 UNIQUE 约束，同一个文件重复导入会被拒绝。所以多条同名项只能是内容不同的多份文件，各自一份参考文风。
+- 修复：写作页与助手页内联选择器收敛为 `src/components/style-profile-picker.tsx`，每行显示来源格式/字数、蒸馏轮次与覆盖进度、指南预览，并提供“全文”只读预览；`src/style/profile-options.ts` 统一装载文风+参考书+覆盖进度；文风书库标注“同名 N 份”并解释来源。
+- 静态检查：`npm run type-check` 与 `--noUnusedLocals --noUnusedParameters` 均通过。
+- 构建：Gradle assembleRelease BUILD SUCCESSFUL（1m55s，无 GGUF 条目）；apksigner v2 通过、证书仍为 `c5dd7c04…`；aapt2 报 versionCode 19、versionName 0.10.1、minSdk 28、仅 arm64-v8a。
+- Release 资产 `OpenFicM-Android-0.10.1.apk`，132,580,032 字节（126.44 MiB），SHA-256 `DE810DDC3F525A1A6E8564425738E1AC585135B82394197D6E79ED451626AB9E`。
+- 包内核对：新文案（“份同名参考文风，来自多次导入的不同文件”“只读预览”“还没有可选文风”）按 UTF-16LE 命中；旧内联选择器的专属文案“当前作品作者文风”“仅遵循作品设定和本轮要求”已消失，可确认两个页面都换成了共用组件。
+- 未做真机验证：选择器在真机上的排版（三行元信息 + 预览）、同名提示与“全文”预览都还只在代码与包级校验层面确认过。
+
 ## 7. 发布流程
 
 源码推送：
