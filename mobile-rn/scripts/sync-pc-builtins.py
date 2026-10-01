@@ -91,15 +91,20 @@ READ_TOOL_NAMES = (
 CHAPTER_WRITE_TOOL_NAMES = ("write_chapter", "edit_chapter")
 CHARACTER_WRITE_TOOL_NAMES = ("create_character", "edit_character", "delete_character")
 WORLD_WRITE_TOOL_NAMES = ("create_world_entry", "edit_world_entry", "delete_world_entry")
+# 对应后端 tool_categories.py 的 note_read / note_write 类别，只保留移动端已实现的工具。
+# 所有内置智能体都可读笔记，只有 build/composer/writer/actor 可写笔记；漏掉这些名字会
+# 让移动端在设置里开放了笔记权限后仍然拒绝工具调用。
+NOTE_READ_TOOL_NAMES = ("list_notes", "read_note")
+NOTE_WRITE_TOOL_NAMES = ("write_note", "edit_note", "delete_note", "move_note")
 AGENT_TOOL_NAMES = {
-    "build": (*READ_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES, "delegate_agent"),
-    "plan": (*READ_TOOL_NAMES, "delegate_agent"),
-    "explore": READ_TOOL_NAMES,
-    "composer": (*READ_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES),
-    "auditor": READ_TOOL_NAMES,
-    "writer": (*READ_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES),
-    "actor": (*READ_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES),
-    "reviewer": READ_TOOL_NAMES,
+    "build": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES, *NOTE_WRITE_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES, "delegate_agent"),
+    "plan": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES, "delegate_agent"),
+    "explore": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES),
+    "composer": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES, *NOTE_WRITE_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES),
+    "auditor": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES),
+    "writer": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES, *NOTE_WRITE_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES),
+    "actor": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES, *NOTE_WRITE_TOOL_NAMES, *CHAPTER_WRITE_TOOL_NAMES, *CHARACTER_WRITE_TOOL_NAMES, *WORLD_WRITE_TOOL_NAMES),
+    "reviewer": (*READ_TOOL_NAMES, *NOTE_READ_TOOL_NAMES),
 }
 
 
@@ -203,10 +208,9 @@ def main() -> None:
         "agents": load_agents([skill["id"] for skill in skills]),
     }
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(
-        json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    # 固定 LF 换行：移动端按下载文本计算 SHA-256，生成结果必须跨平台字节一致。
+    with OUTPUT_PATH.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n")
     print(f"wrote {len(catalog['skills'])} skills and {len(catalog['agents'])} agents to {OUTPUT_PATH}")
 
 
