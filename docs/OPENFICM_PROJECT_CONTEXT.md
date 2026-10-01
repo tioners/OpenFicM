@@ -202,6 +202,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 
 本轮未重跑 expo-doctor 与 0.7.1 时的 catalog 下载校验、verify-change/quality/security 检查；改动只涉及文风抽样、蒸馏流程、文风书库界面和文档，未触及供应链常量或原生依赖。
 
+### 0.8.1 发布记录
+
+- 修复 Issue #1：内容包 `resources/openficm-agent-catalog.json` 里内置智能体的 `toolNames` 白名单停留在笔记功能之前生成的版本，设置里开放笔记权限后仍无工具可调。修复提交 `186e7b0`（补齐白名单并重新生成目录）、`8dfeda4`（固定提交与两处校验值）、`edee329`（同步文档）。
+- 标签 `v0.8.1` 为注释标签，指向 `edee329`；Release 资产 `OpenFicM-Android-0.8.1.apk`，132,543,476 字节（126.40 MiB），SHA-256 `AE9F7D7E141627ECEE0E9A5AFB942CAC5D3E84BA3003B131EB08AA0DA78159BD`。重新下载线上资产核对，与本地构建字节一致。
+- 校验：Gradle assembleRelease BUILD SUCCESSFUL（2m16s，无 GGUF 条目）；apksigner v2 签名通过，证书 SHA-256 与 0.8.0 相同（`c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863`），可覆盖升级；aapt2 报 package `com.openfic.mobile`、versionCode 16、versionName 0.8.1、minSdk 28、targetSdk 36、仅 arm64-v8a。
+- `assets/index.android.bundle` 内含新固定提交 `186e7b0` 与两个新校验值，确认修复确实进了包。
+- 未做真机安装验证。
+
 ## 7. 发布流程
 
 源码推送：
@@ -212,11 +220,17 @@ $env:https_proxy = "http://127.0.0.1:10808"
 git push origin main
 ~~~
 
-正式 Release 使用 GitHub CLI：
+正式 Release 使用 GitHub CLI。打标签前必须先确认本地没有同名标签：标签表里仍残留上游 OpenFic（Syrize）的 release-please 标签（`v0.9.0`、`v0.9.1`、`v0.9.2`、`v0.10.0`，以及已被 OpenFicM 覆盖过的若干版本）。`git tag -a` 遇到同名标签会直接失败，此时 `git push origin <tag>` 会把那个上游标签推上去，Release 就会指向无关的上游提交——0.8.1 发布时正是这样踩到的，删掉标签重新打才修好。注释标签与 0.7.4 起的做法保持一致：
 
 ~~~powershell
-gh release create v0.8.0 .\OpenFicM-Android-0.8.0.apk --repo tioners/OpenFicM --target main --title "OpenFicM 0.8.0" --notes-file docs/releases/v0.8.0.md --latest
+git for-each-ref refs/tags/v0.8.1        # 先看是否已有同名标签
+git tag -d v0.8.1                        # 有上游遗留标签时先删除
+git tag -a v0.8.1 -m "OpenFicM 0.8.1"
+git push origin v0.8.1
+gh release create v0.8.1 .\OpenFicM-Android-0.8.1.apk --repo tioners/OpenFicM --title "OpenFicM 0.8.1" --notes-file docs/releases/v0.8.1.md --verify-tag
 ~~~
+
+不加 `--latest`：GitHub 会把最新发布的非草稿非预发布版本自动标为 latest，`/releases/latest` 已确认返回 v0.8.1。
 
 不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.8.0 和 gh release list 验证标签及资产。
 
