@@ -249,7 +249,7 @@ function buildLornDistillationInstructions(documents: Map<string, string>): stri
     return `# 已加载 reference：${path}\n\n${content}`;
   }).join("\n\n---\n\n");
   const policy = mobileLornPolicy();
-  return `${policy}\n\n---\n\n# Lorn 原版主 Skill\n\n${main}\n\n---\n\n# Lorn 原版白名单 references\n\n${references}\n\n---\n\n${policy}\n\n分析导入参考书时，先调用 list_style_sources，再调用 read_style_source_sample；完成后必须调用 save_reference_style_profile，把结果保存为该参考书的独立文风版本。只有分析用户本人作品并明确要求生成作者文风时，才调用 save_author_style_guide。`;
+  return `${policy}\n\n---\n\n# Lorn 原版主 Skill\n\n${main}\n\n---\n\n# Lorn 原版白名单 references\n\n${references}\n\n---\n\n${policy}\n\n分析导入参考书时，先调用 list_style_sources，再调用 read_style_source_sample；完成后必须调用 save_reference_style_profile，把结果保存为该参考书的参考文风（同一本书只有一份，重复保存是更新它）。只有分析用户本人作品并明确要求生成作者文风时，才调用 save_author_style_guide。`;
 }
 
 function clipInstructionBlock(value: string, maximumCharacters: number): string {
@@ -359,7 +359,7 @@ async function installLornStylePackage(onProgress?: (progress: ResourceInstallPr
     {
       ...distillationMetadata,
       name: "Lorn 原版作者文风蒸馏",
-      description: "基于 Lorn.NovelWriteSkills 原版主 Skill 与白名单 references，从导入参考书中蒸馏独立参考文风版本。",
+      description: "基于 Lorn.NovelWriteSkills 原版主 Skill 与白名单 references，从导入参考书中蒸馏出该书的参考文风。",
       instructions: buildLornDistillationInstructions(documents),
       source: "plugin",
     },

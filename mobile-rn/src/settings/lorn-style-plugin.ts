@@ -3,11 +3,12 @@ import type { AgentMessage } from "@/llm/types";
 import { getSetting, setSetting } from "@/data/repositories";
 import type { ModelSelection, StyleProfile } from "@/types";
 import {
-  createStyleProfileVersion,
+  createAuthorStyleProfileVersion,
   getActiveStyleProfile,
   getLatestAuthorStyleProfile,
   getStyleSource,
   listStyleProfilesForSource,
+  saveReferenceStyleProfile,
 } from "@/data/style-repositories";
 import {
   readStyleSourceAnalysisPlan,
@@ -184,9 +185,8 @@ export async function getAuthorStyleGuide(projectId: string): Promise<string> {
 }
 
 export async function saveAuthorStyleGuide(projectId: string, guide: string): Promise<void> {
-  await createStyleProfileVersion({
+  await createAuthorStyleProfileVersion({
     projectId,
-    kind: "author",
     name: "我的作者文风",
     guide: boundedText(guide, "文风指南"),
     activateForProjectId: projectId,
@@ -397,10 +397,9 @@ export async function distillReferenceStyle(input: {
     instructions,
   );
 
-  input.onProgress?.({ stage: "saving", completed: 0, total: 1, label: "正在保存参考文风版本" });
-  const profile = await createStyleProfileVersion({
+  input.onProgress?.({ stage: "saving", completed: 0, total: 1, label: currentGuide ? "正在更新参考文风" : "正在保存参考文风" });
+  const profile = await saveReferenceStyleProfile({
     sourceId: source.id,
-    kind: "reference",
     name: `《${source.title}》参考文风`,
     guide,
   });
@@ -421,8 +420,8 @@ export async function distillReferenceStyle(input: {
     completed: 1,
     total: 1,
     label: reachedEnd
-      ? `已覆盖全书 ${plan.totalUnits} ${unitName}，保存为 V${profile.version}`
-      : `已覆盖前 ${nextCoveredUntil}/${plan.totalUnits} ${unitName}，保存为 V${profile.version}`,
+      ? `已覆盖全书 ${plan.totalUnits} ${unitName}，参考文风已更新`
+      : `已覆盖前 ${nextCoveredUntil}/${plan.totalUnits} ${unitName}，参考文风已更新`,
   });
   return {
     profile,
@@ -446,9 +445,8 @@ export async function evolveAuthorStyle(input: {
     input.selection,
     evolutionPrompt(aiDraft, authorRevision, currentGuide),
   );
-  const profile = await createStyleProfileVersion({
+  const profile = await createAuthorStyleProfileVersion({
     projectId: input.projectId,
-    kind: "author",
     name: "我的作者文风",
     guide,
     activateForProjectId: input.projectId,

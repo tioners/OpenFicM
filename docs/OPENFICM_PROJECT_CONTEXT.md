@@ -1,6 +1,6 @@
 # OpenFicM 项目交接记录
 
-最后更新：2026-08-21
+最后更新：2026-10-02
 
 这份文档用于让新的开发窗口快速恢复项目上下文。继续工作前先阅读本文件、根目录 AGENTS.md、README.md 和 mobile-rn/DESIGN.md。
 
@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.8.0
+当前正式版本：0.9.0
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.8.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.9.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.8.0 发布提交，以 v0.8.0 标签为准
-- 本轮审查基线：e1cc15f fix(ui): stop sheet backdrop from stealing scroll from inner ScrollView
-- Release 标签：v0.8.0
+- 最新源码提交：本次 0.9.0 发布提交，以 v0.9.0 标签为准
+- 本轮审查基线：186e7b0 fix(mobile): 补齐内置智能体的笔记工具权限
+- Release 标签：v0.9.0
 - Android applicationId：com.openfic.mobile
-- versionCode：15
-- versionName：0.8.0
+- versionCode：17
+- versionName：0.9.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.8.0.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.9.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.8.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版新增按整书/卷/章三级归属的笔记，用于存放大纲、剧情规划和伏笔这类尚未在正文中发生的内容，详见 docs/releases/v0.8.0.md。近几个版本的修复：0.7.7 弹层滚动被 responder 抢占（v0.7.7.md）、0.7.6 输出截断误报成内容为空与换模型后重试仍打旧模型（v0.7.6.md）、0.7.5 多轮继续蒸馏（v0.7.5.md）、0.7.4 429 限流与强制委派（v0.7.4.md）。
+0.9.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版把参考文风从"每轮蒸馏一份"改成"每本参考书一份"：继续蒸馏就地改写同一份指南，启动迁移合并已有的 V1/V2/V3，详见 docs/releases/v0.9.0.md。近几个版本的修复：0.8.1 内容包白名单漏掉笔记工具导致设置里授权也无法调用（v0.8.1.md）、0.8.0 三级笔记（v0.8.0.md）、0.7.7 弹层滚动被 responder 抢占（v0.7.7.md）、0.7.6 输出截断误报成内容为空与换模型后重试仍打旧模型（v0.7.6.md）、0.7.5 多轮继续蒸馏（v0.7.5.md）。
 
 ## 3. 功能清单
 
@@ -82,11 +82,12 @@ GitHub 仓库：
 - 参考文风蒸馏按连续窗口分轮进行：每轮读取连续 24 章（无章节标题的书按每约 1,400 字符切段），分 4 批分析加 1 次合并，共 5 次模型请求；完整参考书不上传。
 - "继续蒸馏"每次向后随机跳到未读区域再取一个窗口，单向递增不重叠，跳幅受"剩余的一半"和"4 个窗口"双上界约束，必然收敛到书尾；覆盖进度存在 `style.distillation.coverage.<sourceId>`。
 - 多轮证据用增量演进合成：以上一版指南为基线并入本轮新证据，不全量重发历史备忘录，因此轮数不受上下文长度限制。
+- 参考文风每本参考书只保留一份：`saveReferenceStyleProfile` 就地改写（版本号归一为 1），不再每轮插入新版本；启动迁移会把历史 V1/V2/V3 合并到最新一份，并把 `app_settings` 活跃选择与 `chapter_drafts.style_profile_id` 改指保留的那份。
 - 断点记录所属窗口，中断续跑会重放同一段正文，不会复用旧备忘录去分析新窗口。
-- 参考文风与作品无关，可跨作品选择；作者文风按作品隔离，并保存递增版本。
+- 参考文风与作品无关，可跨作品选择，且每本参考书只有一份、反复蒸馏就地更新（0.9.0 起）；作者文风按作品隔离，并保存递增版本。
 - 助手页和写作页都可选择创作文风；文风会注入主智能体和正文类子智能体。
 - `write_chapter`/`edit_chapter` 保存 AI 原稿和所用文风；作者实际修改并保存后，可在预览页进化当前作品的作者文风。
-- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.8.0 发布亮点见 `docs/releases/v0.8.0.md`。
+- 完整用户操作和隐私说明见 `docs/USER_GUIDE.md`，0.9.0 发布亮点见 `docs/releases/v0.9.0.md`。
 
 ### 本地检索
 
@@ -104,7 +105,7 @@ GitHub 仓库：
 - src/screens/projects-screen.tsx：书架和作品入口。
 - src/screens/writing-screen.tsx：卷章目录、预览/编辑、保存和 Markdown 导出入口。
 - src/screens/assistant-screen.tsx：作品级助手会话、模型选择、消息编辑和重试。
-- src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考/作者文风版本和作品级选择。
+- src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考文风与作者文风版本和作品级选择。
 - src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。
 - src/agent/runtime.ts：Agent 主循环、工具调用、结构化提问、子 Agent 协作和 trace。
 - src/agent/tools.ts：移动端本地工具定义和执行边界。

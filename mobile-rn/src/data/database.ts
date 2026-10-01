@@ -313,6 +313,51 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     WHERE key = 'activeModelId'
       AND NOT EXISTS (SELECT 1 FROM models WHERE models.id = app_settings.value);
   `);
+  // 参考文风从"每轮蒸馏一份"改为"每本参考书一份"：把历史遗留的 V1/V2/V3 合并到最新一份，
+  // 保留的指南已经包含前几轮结论。删除前先把引用改到保留的那份——作品活跃选择不改会静默退回
+  // "不使用文风"，章节草稿的 style_profile_id 不改会被外键置空、丢掉"当时用了哪份文风"的记录。
+  // 语句幂等，每次启动重跑都是空操作。
+  await database.execAsync(`
+    UPDATE app_settings
+    SET value = (
+      SELECT keep.id
+      FROM style_profiles stale
+      JOIN style_profiles keep ON keep.series_id = stale.series_id
+      WHERE stale.id = app_settings.value
+      ORDER BY keep.version DESC
+      LIMIT 1
+    )
+    WHERE key LIKE 'style.activeProfile.%'
+      AND EXISTS (
+        SELECT 1 FROM style_profiles stale
+        WHERE stale.id = app_settings.value AND stale.kind = 'reference'
+      );
+
+    UPDATE chapter_drafts
+    SET style_profile_id = (
+      SELECT keep.id
+      FROM style_profiles stale
+      JOIN style_profiles keep ON keep.series_id = stale.series_id
+      WHERE stale.id = chapter_drafts.style_profile_id
+      ORDER BY keep.version DESC
+      LIMIT 1
+    )
+    WHERE style_profile_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM style_profiles stale
+        WHERE stale.id = chapter_drafts.style_profile_id AND stale.kind = 'reference'
+      );
+
+    DELETE FROM style_profiles
+    WHERE kind = 'reference'
+      AND EXISTS (
+        SELECT 1 FROM style_profiles newer
+        WHERE newer.series_id = style_profiles.series_id
+          AND newer.version > style_profiles.version
+      );
+
+    UPDATE style_profiles SET version = 1 WHERE kind = 'reference' AND version <> 1;
+  `);
   await migrateChatSessions(database);
 }
 

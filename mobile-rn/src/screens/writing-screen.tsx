@@ -17,6 +17,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import { exportNovel, type ExportScope } from "@/lib/export";
+import { styleProfileLabel } from "@/lib/style-label";
 import { countNotesUnder, deleteNotesUnder } from "@/data/note-repositories";
 import {
   createChapter,
@@ -568,7 +569,7 @@ export function WritingScreen() {
         <Pressable accessibilityRole="button" onPress={() => setStylePickerVisible(true)} style={styles.styleSelector}>
           <Ionicons name="color-wand-outline" size={17} color={activeStyleProfile ? colors.primary : colors.textMuted} />
           <Text numberOfLines={1} style={[styles.styleSelectorText, activeStyleProfile && styles.styleSelectorTextActive]}>
-            {activeStyleProfile ? activeStyleProfile.name + " V" + activeStyleProfile.version : "不使用创作文风"}
+            {activeStyleProfile ? styleProfileLabel(activeStyleProfile) : "不使用创作文风"}
           </Text>
           <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
         </Pressable>
@@ -670,7 +671,7 @@ export function WritingScreen() {
                   <Pressable key={profile.id} onPress={() => void chooseStyle(profile)} style={[styles.styleOption, selected && styles.styleOptionActive]}>
                     <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
                     <View style={styles.styleOptionCopy}>
-                      <Text style={styles.styleOptionTitle} numberOfLines={1}>{profile.name} V{profile.version}</Text>
+                      <Text style={styles.styleOptionTitle} numberOfLines={1}>{styleProfileLabel(profile)}</Text>
                       <Text style={styles.styleOptionMeta}>{profile.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
                     </View>
                   </Pressable>

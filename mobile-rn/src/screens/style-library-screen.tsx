@@ -16,7 +16,7 @@ import {
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
-  createStyleProfileVersion,
+  createAuthorStyleProfileVersion,
   deleteStyleProfile,
   getActiveStyleProfile,
   listStyleProfiles,
@@ -25,6 +25,7 @@ import {
   renameStyleSource,
   setActiveStyleProfile,
 } from "@/data/style-repositories";
+import { styleProfileLabel } from "@/lib/style-label";
 import { resolveModelSelection } from "@/llm/selection";
 import type { RootStackParamList } from "@/navigation/types";
 import {
@@ -203,6 +204,18 @@ export function StyleLibraryScreen() {
     }
   };
 
+  const confirmRestart = () => {
+    if (!selectedSource) return;
+    Alert.alert(
+      "重新开始蒸馏",
+      "会清空已覆盖的进度，从全书开头重新扫描；新结果直接替换《" + selectedSource.title + "》现有的参考文风，旧内容不会保留。",
+      [
+        { text: "取消", style: "cancel" },
+        { text: "重新开始", style: "destructive", onPress: () => void distill(true) },
+      ],
+    );
+  };
+
   const activate = async (profile: StyleProfile | null) => {
     if (!projectId) {
       setError("请先从书架打开一部作品，再选择创作文风");
@@ -241,7 +254,7 @@ export function StyleLibraryScreen() {
     if (!selectedSource) return;
     Alert.alert(
       "删除参考书",
-      "确定删除《" + selectedSource.title + "》及其全部参考文风版本？原文件只保存在本机。",
+      "确定删除《" + selectedSource.title + "》及其参考文风？原文件只保存在本机。",
       [
         { text: "取消", style: "cancel" },
         {
@@ -268,9 +281,8 @@ export function StyleLibraryScreen() {
     setBusy(true);
     setError(null);
     try {
-      const profile = await createStyleProfileVersion({
+      const profile = await createAuthorStyleProfileVersion({
         projectId,
-        kind: "author",
         name: "我的作者文风",
         guide: authorGuide,
         activateForProjectId: projectId,
@@ -287,7 +299,7 @@ export function StyleLibraryScreen() {
   };
 
   const removeProfile = (profile: StyleProfile) => {
-    Alert.alert("删除文风版本", "确定删除“" + profile.name + " V" + profile.version + "”？", [
+    Alert.alert("删除文风", "确定删除“" + styleProfileLabel(profile) + "”？", [
       { text: "取消", style: "cancel" },
       {
         text: "删除",
@@ -340,7 +352,7 @@ export function StyleLibraryScreen() {
               <View style={styles.activeStrip}>
                 <Ionicons name="checkmark-circle-outline" size={19} color={colors.primary} />
                 <Text style={styles.activeStripText} numberOfLines={2}>
-                  当前使用：{activeProfile ? activeProfile.name + " V" + activeProfile.version : "不使用文风"}
+                  当前使用：{activeProfile ? styleProfileLabel(activeProfile) : "不使用文风"}
                 </Text>
                 {activeProfile ? <Pressable onPress={() => void activate(null)} disabled={busy} style={styles.clearActive}><Text style={styles.clearActiveText}>清除</Text></Pressable> : null}
               </View>
@@ -419,7 +431,7 @@ export function StyleLibraryScreen() {
                     loading={busy}
                   />
                   {coverageStarted || distillationCheckpoint ? (
-                    <Button label="重新开始" variant="secondary" onPress={() => void distill(true)} disabled={busy} />
+                    <Button label="重新开始" variant="secondary" onPress={confirmRestart} disabled={busy} />
                   ) : null}
                   <Pressable accessibilityLabel="重命名参考书" onPress={() => setEditingSource(true)} style={styles.secondaryIconAction}>
                     <Ionicons name="create-outline" size={21} color={colors.text} />
@@ -438,8 +450,8 @@ export function StyleLibraryScreen() {
                   <Text style={styles.checkpointText}>
                     覆盖到第 {distillationCoverage.coveredUntil}/{distillationCoverage.totalUnits} {coverageUnitName}。
                     {coverageFinished
-                      ? "继续积累样本请点击“重新开始”重新扫描全书。"
-                      : "点击“继续蒸馏”会向后随机跳到未读区域，再取一段连续样本并入现有指南。"}
+                      ? "继续积累样本请点击“重新开始”重新扫描全书，这会用新结果替换当前参考文风。"
+                      : "点击“继续蒸馏”会向后随机跳到未读区域，再取一段连续样本并入同一份参考文风。"}
                   </Text>
                 </View>
               ) : null}
@@ -454,12 +466,12 @@ export function StyleLibraryScreen() {
               {distillationProgress ? (
                 <Text style={styles.progressText}>{distillationProgress}</Text>
               ) : (
-                <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入文风指南，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书。</Text>
+                <Text style={styles.helperText}>每轮抽取连续 24 {coverageUnitName}、分 4 批分析后并入参考文风，不会上传整本小说。反复点击“继续蒸馏”会向后随机推进，逐步覆盖全书；每本书始终只有一份参考文风。</Text>
               )}
               <Text style={styles.helperText}>
                 蒸馏使用“设置 → 模型与供应商”里的默认模型：{distillationModelName ?? "尚未选择默认模型"}
               </Text>
-              <Text style={styles.sectionTitle}>参考文风版本</Text>
+              <Text style={styles.sectionTitle}>参考文风</Text>
               {sourceProfiles.length ? sourceProfiles.map((profile) => (
                 <ProfileRow
                   key={profile.id}
@@ -469,7 +481,7 @@ export function StyleLibraryScreen() {
                   onActivate={() => void activate(profile)}
                   disabled={busy || !projectId}
                 />
-              )) : <Text style={styles.emptyHint}>还没有版本，点击“蒸馏文风”生成。</Text>}
+              )) : <Text style={styles.emptyHint}>还没有参考文风，点击“蒸馏文风”生成。</Text>}
             </ScrollView>
           </View>
         </SheetBackdrop>
@@ -480,8 +492,8 @@ export function StyleLibraryScreen() {
           <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleWrap}>
-                <Text style={styles.sheetTitle} numberOfLines={2}>{selectedProfile?.name} V{selectedProfile?.version}</Text>
-                <Text style={styles.sheetMeta}>{selectedProfile?.kind === "author" ? "作者文风版本" : "参考小说文风版本"}</Text>
+                <Text style={styles.sheetTitle} numberOfLines={2}>{selectedProfile ? styleProfileLabel(selectedProfile) : ""}</Text>
+                <Text style={styles.sheetMeta}>{selectedProfile?.kind === "author" ? "作者文风版本" : "参考小说文风"}</Text>
               </View>
               <Pressable accessibilityLabel="关闭文风详情" onPress={() => setSelectedProfile(null)} style={styles.iconButton}>
                 <Ionicons name="close" size={24} color={colors.textMuted} />
@@ -541,7 +553,7 @@ function ProfileRow({
       <Pressable onPress={onPress} style={styles.profileMain}>
         <Ionicons name={active ? "checkmark-circle" : "document-text-outline"} size={20} color={active ? colors.primary : colors.textMuted} />
         <View style={styles.profileCopy}>
-          <Text style={styles.profileName} numberOfLines={1}>{profile.name} V{profile.version}</Text>
+          <Text style={styles.profileName} numberOfLines={1}>{styleProfileLabel(profile)}</Text>
           <Text style={styles.profileMeta} numberOfLines={2}>{profile.guide.slice(0, 120).replace(/\s+/g, " ")}</Text>
         </View>
       </Pressable>

@@ -85,8 +85,8 @@ export const TOOL_CATALOG = [
   { key: "read_author_style_guide", name: "读取作者文风指南", readonly: true },
   { key: "list_style_sources", name: "列出参考书", readonly: true },
   { key: "read_style_source_sample", name: "读取参考书样本", readonly: true },
-  { key: "list_style_profiles", name: "列出文风版本", readonly: true },
-  { key: "read_style_profile", name: "读取文风版本", readonly: true },
+  { key: "list_style_profiles", name: "列出文风", readonly: true },
+  { key: "read_style_profile", name: "读取文风", readonly: true },
   { key: "select_style_profile", name: "切换创作文风", readonly: false },
   { key: "save_reference_style_profile", name: "保存参考文风", readonly: false },
   { key: "write_chapter", name: "创建章节", readonly: false },
@@ -252,7 +252,7 @@ function adaptLornStyleSkill(skill: AgentSkill): AgentSkill {
     return {
       ...skill,
       name: "Lorn 原版参考文风蒸馏",
-      description: "读取文风书库中的参考小说样本，使用 Lorn.NovelWriteSkills 方法生成独立参考文风版本。",
+      description: "读取文风书库中的参考小说样本，使用 Lorn.NovelWriteSkills 方法生成该参考书的参考文风。",
       instructions: compactLornDistillationInstructions(skill.instructions
         .replace(
           /原文中的 Agents\.md 注册、蒸馏产物目录和作者风格模板文件统一映射为 save_author_style_guide；最终必须把完整 Markdown 指南保存到当前作品。/g,
@@ -260,7 +260,7 @@ function adaptLornStyleSkill(skill: AgentSkill): AgentSkill {
         )
         .replace(
           /完成蒸馏后必须调用 save_author_style_guide 保存完整结果。/g,
-          "先调用 list_style_sources 和 read_style_source_sample 读取用户选择的参考书，完成蒸馏后调用 save_reference_style_profile 保存独立参考文风版本。",
+          "先调用 list_style_sources 和 read_style_source_sample 读取用户选择的参考书，完成蒸馏后调用 save_reference_style_profile 保存该书的参考文风；同一本书始终只有一份，重复保存是更新它而不是新建版本。",
         )),
     };
   }

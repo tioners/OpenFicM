@@ -205,38 +205,34 @@ export async function getLatestAuthorStyleProfile(projectId: string): Promise<St
   return row ? mapStyleProfile(row) : null;
 }
 
-export async function createStyleProfileVersion(input: {
-  projectId?: string | null;
-  sourceId?: string | null;
-  kind: StyleProfileKind;
-  name: string;
-  guide: string;
-  seriesId?: string;
-  activateForProjectId?: string | null;
-}): Promise<StyleProfile> {
-  const database = await getDatabase();
-  const guide = requiredText(input.guide, "文风指南");
+function boundedGuide(value: string): string {
+  const guide = requiredText(value, "文风指南");
   if (guide.length > MAX_STYLE_GUIDE_CHARACTERS) {
     throw new Error(`文风指南超过 ${MAX_STYLE_GUIDE_CHARACTERS} 字符限制`);
   }
-  const projectId = input.projectId?.trim() || null;
-  const sourceId = input.sourceId?.trim() || null;
-  if (input.kind === "author" && (!projectId || sourceId)) throw new Error("作者文风必须绑定作品且不能绑定参考书");
-  if (input.kind === "reference" && (!sourceId || projectId)) throw new Error("参考文风必须绑定参考书且不能绑定作品");
-  const seriesId = input.seriesId?.trim()
-    || (input.kind === "author" ? `author-${projectId}` : `reference-${sourceId}`);
+  return guide;
+}
+
+/**
+ * 作者文风按作品累积多个版本：每次对比 AI 原稿与作者定稿都保留历史，便于回看演进。
+ * 参考文风不走这里——每本参考书只有一份，见 saveReferenceStyleProfile。
+ */
+export async function createAuthorStyleProfileVersion(input: {
+  projectId: string;
+  name: string;
+  guide: string;
+  activateForProjectId?: string | null;
+}): Promise<StyleProfile> {
+  const database = await getDatabase();
+  const guide = boundedGuide(input.guide);
+  const projectId = requiredText(input.projectId, "作品").trim();
+  const seriesId = `author-${projectId}`;
   const name = requiredText(input.name, "文风名称").slice(0, 200);
   const now = new Date().toISOString();
   let profile: StyleProfile | null = null;
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    if (projectId) {
-      const project = await transaction.getFirstAsync<{ id: string }>("SELECT id FROM projects WHERE id = ?", projectId);
-      if (!project) throw new Error("作品不存在");
-    }
-    if (sourceId) {
-      const source = await transaction.getFirstAsync<{ id: string }>("SELECT id FROM style_sources WHERE id = ?", sourceId);
-      if (!source) throw new Error("参考书不存在");
-    }
+    const project = await transaction.getFirstAsync<{ id: string }>("SELECT id FROM projects WHERE id = ?", projectId);
+    if (!project) throw new Error("作品不存在");
     const latest = await transaction.getFirstAsync<StyleProfileRow>(
       "SELECT * FROM style_profiles WHERE series_id = ? ORDER BY version DESC LIMIT 1",
       seriesId,
@@ -253,8 +249,8 @@ export async function createStyleProfileVersion(input: {
         id,
         seriesId,
         projectId,
-        sourceId,
-        input.kind,
+        null,
+        "author",
         name,
         version,
         guide,
@@ -265,8 +261,8 @@ export async function createStyleProfileVersion(input: {
         id,
         seriesId,
         projectId,
-        sourceId,
-        kind: input.kind,
+        sourceId: null,
+        kind: "author",
         name,
         version,
         guide,
@@ -276,8 +272,7 @@ export async function createStyleProfileVersion(input: {
     }
     const activateProjectId = input.activateForProjectId?.trim() || null;
     if (activateProjectId && profile) {
-      const allowed = profile.kind === "reference" || profile.projectId === activateProjectId;
-      if (!allowed) throw new Error("该作者文风不属于当前作品");
+      if (profile.projectId !== activateProjectId) throw new Error("该作者文风不属于当前作品");
       await transaction.runAsync(
         `INSERT INTO app_settings(key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -287,6 +282,98 @@ export async function createStyleProfileVersion(input: {
     }
   });
   if (!profile) throw new Error("文风版本保存失败");
+  return profile;
+}
+
+/**
+ * 保存参考文风：每本参考书只保留一份，反复蒸馏就地改写它，不再累积 V2/V3。
+ * 历史遗留的多版本在这里合并到最新一份（最新的指南已经包含前几轮的结论），
+ * 指向被删版本的活跃选择一并改指保留的那份，避免作品静默退回"不使用文风"。
+ */
+export async function saveReferenceStyleProfile(input: {
+  sourceId: string;
+  name: string;
+  guide: string;
+}): Promise<StyleProfile> {
+  const database = await getDatabase();
+  const guide = boundedGuide(input.guide);
+  const sourceId = requiredText(input.sourceId, "参考书").trim();
+  const seriesId = `reference-${sourceId}`;
+  const name = requiredText(input.name, "文风名称").slice(0, 200);
+  const now = new Date().toISOString();
+  let profile: StyleProfile | null = null;
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const source = await transaction.getFirstAsync<{ id: string }>("SELECT id FROM style_sources WHERE id = ?", sourceId);
+    if (!source) throw new Error("参考书不存在");
+    const existing = await transaction.getAllAsync<StyleProfileRow>(
+      "SELECT * FROM style_profiles WHERE series_id = ? ORDER BY version DESC",
+      seriesId,
+    );
+    const kept = existing[0];
+    if (!kept) {
+      const id = createId();
+      await transaction.runAsync(
+        `INSERT INTO style_profiles(
+          id, series_id, project_id, source_id, kind, name, version, guide, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        seriesId,
+        null,
+        sourceId,
+        "reference",
+        name,
+        1,
+        guide,
+        now,
+        now,
+      );
+      profile = {
+        id,
+        seriesId,
+        projectId: null,
+        sourceId,
+        kind: "reference",
+        name,
+        version: 1,
+        guide,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return;
+    }
+    const stale = existing.slice(1);
+    if (stale.length) {
+      const placeholders = stale.map(() => "?").join(", ");
+      const staleIds = stale.map((row) => row.id);
+      // 合并前先把指向旧版本的引用改到保留的那份：作品的活跃选择不能静默退回"不使用文风"，
+      // 章节草稿记录的"当时用了哪份文风"也应该继续指向同一本书的文风。
+      await transaction.runAsync(
+        `UPDATE app_settings SET value = ? WHERE key LIKE ? AND value IN (${placeholders})`,
+        kept.id,
+        `${ACTIVE_STYLE_KEY_PREFIX}%`,
+        ...staleIds,
+      );
+      await transaction.runAsync(
+        `UPDATE chapter_drafts SET style_profile_id = ? WHERE style_profile_id IN (${placeholders})`,
+        kept.id,
+        ...staleIds,
+      );
+      await transaction.runAsync(
+        `DELETE FROM style_profiles WHERE id IN (${placeholders})`,
+        ...staleIds,
+      );
+    }
+    // 版本号归一为 1：只剩一份文件时 V 号没有意义，也让 UNIQUE(series_id, version) 保持可插入。
+    await transaction.runAsync(
+      "UPDATE style_profiles SET name = ?, guide = ?, version = 1, updated_at = ? WHERE id = ?",
+      name,
+      guide,
+      now,
+      kept.id,
+    );
+    profile = { ...mapStyleProfile(kept), name, guide, version: 1, updatedAt: now };
+  });
+  if (!profile) throw new Error("参考文风保存失败");
   return profile;
 }
 

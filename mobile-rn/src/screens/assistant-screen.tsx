@@ -19,6 +19,7 @@ import { AgentRunError, runAgent } from "@/agent/runtime";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
 import { MessageActionBar } from "@/components/message-action-bar";
 import { Button, EmptyState, ErrorNotice, Header, Screen, SheetBackdrop } from "@/components/ui";
+import { styleProfileLabel } from "@/lib/style-label";
 import {
   addMessage,
   createChatSession,
@@ -658,7 +659,7 @@ export function AssistantScreen() {
           <Ionicons name="color-wand-outline" size={17} color={activeStyleProfile ? colors.primary : colors.textMuted} />
         )}
         <Text style={[styles.styleSelectorText, activeStyleProfile && styles.styleSelectorTextActive]} numberOfLines={1}>
-          {activeStyleProfile ? `${activeStyleProfile.name} V${activeStyleProfile.version}` : "不使用创作文风"}
+          {activeStyleProfile ? styleProfileLabel(activeStyleProfile) : "不使用创作文风"}
         </Text>
         <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
       </Pressable>
@@ -880,7 +881,7 @@ export function AssistantScreen() {
                   <Pressable onPress={() => void chooseStyle(item)} style={[styles.sheetRow, selected && styles.sheetRowActive]}>
                     <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={20} color={selected ? colors.primary : colors.textMuted} />
                     <View style={styles.sheetRowText}>
-                      <Text style={styles.sheetRowTitle} numberOfLines={1}>{item.name} V{item.version}</Text>
+                      <Text style={styles.sheetRowTitle} numberOfLines={1}>{styleProfileLabel(item)}</Text>
                       <Text style={styles.sheetRowMeta}>{item.kind === "author" ? "当前作品作者文风" : "参考小说文风"}</Text>
                     </View>
                   </Pressable>

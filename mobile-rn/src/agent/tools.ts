@@ -19,12 +19,12 @@ import {
   searchChapters,
 } from "@/data/repositories";
 import {
-  createStyleProfileVersion,
   getActiveStyleProfile,
   getStyleProfile,
   getStyleSource,
   listStyleProfiles,
   listStyleSources,
+  saveReferenceStyleProfile,
   setActiveStyleProfile,
 } from "@/data/style-repositories";
 import type { AgentToolDefinition } from "@/llm/types";
@@ -196,12 +196,12 @@ export const agentTools: AgentToolDefinition[] = [
   },
   {
     name: "list_style_profiles",
-    description: "列出当前作品可选择的参考文风与作者文风版本",
+    description: "列出当前作品可选择的参考文风与作者文风",
     parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
     name: "read_style_profile",
-    description: "读取指定文风版本的完整 Markdown 约束指南",
+    description: "读取指定文风的完整 Markdown 约束指南",
     parameters: {
       type: "object",
       properties: { profile_id: { type: "string", description: "文风版本 ID" } },
@@ -221,7 +221,7 @@ export const agentTools: AgentToolDefinition[] = [
   },
   {
     name: "save_reference_style_profile",
-    description: "把对某本导入参考书的文风蒸馏结果保存为独立、可选择的参考文风版本",
+    description: "把对某本导入参考书的文风蒸馏结果保存为该书的参考文风；同一本书始终只有一份参考文风，重复保存会直接更新它而不是新建版本",
     parameters: {
       type: "object",
       properties: {
@@ -585,9 +585,8 @@ export async function executeAgentTool(
   if (name === "save_reference_style_profile") {
     const source = await getStyleSource(requiredString(args, "source_id"));
     if (!source) throw new Error("未找到参考书");
-    const profile = await createStyleProfileVersion({
+    const profile = await saveReferenceStyleProfile({
       sourceId: source.id,
-      kind: "reference",
       name: "《" + source.title + "》参考文风",
       guide: requiredString(args, "guide"),
     });
@@ -595,7 +594,6 @@ export async function executeAgentTool(
       success: true,
       profile_id: profile.id,
       name: profile.name,
-      version: profile.version,
     };
   }
   if (name === "save_author_style_guide") {

@@ -1,6 +1,7 @@
 import { callModel } from "@/llm/client";
 import type { AgentMessage, AgentToolCall, AgentToolDefinition } from "@/llm/types";
 import { createId } from "@/lib/id";
+import { styleProfileLabel } from "@/lib/style-label";
 import {
   getAgentDefinitions,
   getAgentRules,
@@ -247,7 +248,7 @@ function toolResultDetail(name: string, result: Record<string, unknown>): string
   if (name === "read_world_entry") return `已读取世界书：${isRecord(result.entry) ? String(result.entry.name ?? "") : ""}`.trim();
   if (name === "read_author_style_guide") return result.exists === true ? "已读取作者文风指南" : "当前作品尚无作者文风指南";
   if (name === "list_style_sources") return `已读取 ${count("sources")} 本参考书`;
-  if (name === "list_style_profiles") return `已读取 ${count("profiles")} 个文风版本`;
+  if (name === "list_style_profiles") return `已读取 ${count("profiles")} 份文风`;
   if (name === "read_style_source_sample") return `已读取参考书样本：${isRecord(result.source) ? String(result.source.title ?? "") : ""}`.trim();
   if (name === "read_style_profile") return `已读取文风：${isRecord(result.profile) ? String(result.profile.name ?? "") : ""}`.trim();
   if (name === "select_style_profile") return `已切换创作文风：${String(result.active_profile_name ?? "")}`;
@@ -394,7 +395,7 @@ function systemPrompt(input: {
   if (input.catalog.activeStyleProfile && shouldInjectAuthorStyleGuide(input.agent, input.userRequest)) {
     const profile = input.catalog.activeStyleProfile;
     const profileType = profile.kind === "author" ? "作者文风" : "参考小说文风";
-    sections.push(`当前创作使用的${profileType}是“${profile.name} V${profile.version}”：\n${truncate(profile.guide, 16_000)}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。不得复制参考小说原句或专有表达。`);
+    sections.push(`当前创作使用的${profileType}是“${styleProfileLabel(profile)}”：\n${truncate(profile.guide, 16_000)}\n\n生成或修改正文时必须把这份指南作为额外文风约束；它不能覆盖用户本轮明确要求、事实一致性或安全边界。不得复制参考小说原句或专有表达。`);
   }
   const enabledRules = input.catalog.rules.filter((rule) => rule.enabled && rule.content.trim());
   if (enabledRules.length) {
@@ -453,7 +454,7 @@ async function ensureWritingStyleSelection(input: {
     || !input.askUser) return;
   const profiles = latestStyleProfiles(input.catalog.availableStyleProfiles).slice(0, 4);
   const profileByLabel = new Map(profiles.map((profile) => [
-    `${profile.name} V${profile.version}`,
+    styleProfileLabel(profile),
     profile,
   ]));
   const eventId = input.recorder.add({
@@ -461,7 +462,7 @@ async function ensureWritingStyleSelection(input: {
     status: "waiting",
     title: "选择本次创作文风",
     agentName: input.agentName,
-    detail: "正文生成前确认要注入的文风版本",
+    detail: "正文生成前确认要注入的文风",
   });
   const response = await input.askUser({
     id: eventId,
@@ -471,7 +472,7 @@ async function ensureWritingStyleSelection(input: {
       description: "选择后会绑定到本次 AI 原稿，作者修改后可据此进化个人文风。",
       options: [
         ...profiles.map((profile, index) => ({
-          label: `${profile.name} V${profile.version}${index === 0 ? "（推荐）" : ""}`,
+          label: `${styleProfileLabel(profile)}${index === 0 ? "（推荐）" : ""}`,
           description: profile.kind === "author" ? "使用当前作品积累的作者文风" : "使用导入参考小说蒸馏出的约束",
         })),
         { label: "不使用文风", description: "只遵循本轮要求和作品设定" },
@@ -490,8 +491,8 @@ async function ensureWritingStyleSelection(input: {
       ?? profiles.find((profile) => profile.id === answer || profile.name === answer)
       ?? null;
     if (!selected) {
-      input.recorder.update(eventId, { status: "error", detail: "未找到选择的文风版本" });
-      throw new Error("未找到选择的文风版本，请从文风书库重新选择");
+      input.recorder.update(eventId, { status: "error", detail: "未找到选择的文风" });
+      throw new Error("未找到选择的文风，请从文风书库重新选择");
     }
   }
   await setActiveStyleProfile(input.projectId, selected?.id ?? null);
@@ -499,7 +500,7 @@ async function ensureWritingStyleSelection(input: {
   input.catalog.activeStyleProfile = selected;
   input.recorder.update(eventId, {
     status: "completed",
-    detail: selected ? `已选择 ${selected.name} V${selected.version}` : "本次不使用文风",
+    detail: selected ? `已选择 ${styleProfileLabel(selected)}` : "本次不使用文风",
   });
 }
 
