@@ -211,6 +211,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - `assets/index.android.bundle` 内含新固定提交 `186e7b0` 与两个新校验值，确认修复确实进了包。
 - 未做真机安装验证。
 
+### 0.9.0 发布记录
+
+- 用户需求：参考文风每蒸一轮就多一个版本文件，希望每本参考书只保留一份、反复蒸馏在同一份上持续改进。行为变更提交 `685a4b8`（`saveReferenceStyleProfile` 就地更新、启动迁移合并旧版本、参考文风不再显示版本号、"重新开始"二次确认）。
+- 迁移 SQL 用影子 SQLite 库实测：V1/V2/V3 合并为保留最新一份并把版本号归一为 1，`style.activeProfile.*` 与 `chapter_drafts.style_profile_id` 改指保留的那份，作者文风版本与无关设置不受影响，重复执行结果不变、外键检查通过。
+- 标签 `v0.9.0` 为注释标签；Release 资产 `OpenFicM-Android-0.9.0.apk`，132,548,068 字节（126.41 MiB），SHA-256 `6DB5C618B1E17276C4465B7FAD5CD41FAEFAA8DA0AA3F912F3D59D8D99D5C0FA`。
+- 校验：Gradle assembleRelease BUILD SUCCESSFUL（1m48s，无 GGUF 条目）；apksigner v2 通过，证书仍为 `c5dd7c04…`，可覆盖升级；aapt2 报 versionCode 17、versionName 0.9.0、minSdk 28、targetSdk 36、仅 arm64-v8a。
+- `assets/index.android.bundle` 里能查到 `saveReferenceStyleProfile`/`styleProfileLabel`，新文案（"重新开始蒸馏""参考文风已更新"）在、旧文案（"保存为 V""参考文风版本"）已消失。Hermes 包内中文以 UTF-16LE 存储，按 UTF-8 搜会全部落空。
+- 未做真机验证：升级后合并效果、续蒸是否就地更新、重新开始确认框都还只在代码与包级校验层面确认过。
+
 ## 7. 发布流程
 
 源码推送：
