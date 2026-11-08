@@ -7,6 +7,7 @@
 - `expo-secure-store` 保存供应商 API Key，SQLite 只保存 SecureStore 引用。
 - `llm/client.ts` 将 OpenAI-compatible、Gemini 和 Anthropic 的请求/响应格式归一为 Agent turn。
 - `agent` 只调用本地仓储工具，不依赖桌面端后端。
+- `markdown/` 与 `components/markdown-view.tsx` 负责把助手回复渲染成移动端友好的 Markdown：`markdown-it`（纯 JS，无原生依赖）解析成 token，渲染层再转成 RN 组件。`html: false`，链接只放行 http/https/mailto，图片不加载远程资源。
 - `search` 使用首次启动后下载到应用私有目录的 GGUF 嵌入和重排模型，为章节、角色和世界书建立本地向量索引。
 - `settings` 保存索引、上下文、工具权限、规则、技能和智能体配置。
 
@@ -111,6 +112,10 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 ### 2026-08-19 - OpenFicM 0.6.0 导出与可恢复编辑
 
 写作页改为预览优先并支持章节、卷、全书 Markdown 导出；助手增加失败请求重试和历史用户消息编辑，编辑点之后的线性上下文通过事务统一重建。
+
+### 2026-11-09 - 助手回复支持 Markdown 渲染
+
+助手回复此前是一条 `<Text>`，`**粗体**`、`## 标题`、代码块和表格都原样露出。新增 `src/markdown/markdown-parser.ts`（markdown-it 纯函数封装）与 `src/components/markdown-view.tsx`（token → RN 组件），支持标题、粗斜体、删除线、嵌套列表、引用块、分隔线、行内代码、围栏代码块（等宽 + 横向滚动 + 语言名）与表格（保留对齐、横向滚动）。安全取舍：`html: false` 且不回显原始 HTML，链接只放行 http/https/mailto（markdown-it 自身还会挡掉 `javascript:`/`data:`/`vbscript:`），图片只显示 `[图片：说明]` 占位而不加载远程资源。用户消息保持纯文本，避免把用户输入擅自解析成列表。解析结果按消息内容 `useMemo` 缓存，流式刷新时不重建。
 
 ### 2026-10-06 - 弹层滚动与助手对话滚动修复（issue #2、#3）
 

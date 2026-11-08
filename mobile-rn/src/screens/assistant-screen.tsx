@@ -20,6 +20,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { AgentRunError, runAgent } from "@/agent/runtime";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
 import { MessageActionBar } from "@/components/message-action-bar";
+import { MarkdownView } from "@/components/markdown-view";
 import { Button, EmptyState, ErrorNotice, Header, Screen, SheetBackdrop } from "@/components/ui";
 import { StyleProfilePickerSheet } from "@/components/style-profile-picker";
 import { styleProfileLabel } from "@/lib/style-label";
@@ -792,7 +793,14 @@ export function AssistantScreen() {
                     ) : null}
                   </View>
                 ) : null}
-                <Text selectable style={styles.messageText}>{item.content}</Text>
+                {item.role === "assistant" ? (
+                  // 助手回复按 Markdown 渲染；用户消息保持纯文本，避免把 "1. " 这类输入擅自变成列表。
+                  item.content.trim()
+                    ? <MarkdownView content={item.content} />
+                    : <Text selectable style={styles.messageText}>{item.content}</Text>
+                ) : (
+                  <Text selectable style={styles.messageText}>{item.content}</Text>
+                )}
                 {failed && item.metadata?.errorDetail ? <ErrorDetails detail={item.metadata.errorDetail} /> : null}
                 {item.role === "assistant" && messageRetry ? (
                   <MessageActionBar content={item.content} onRetry={() => void send(messageRetry)} retryDisabled={sending} />

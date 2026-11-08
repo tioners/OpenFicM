@@ -42,6 +42,10 @@ Release 构建缺少前四项时会直接失败；使用 lineage 时必须同时
 - 运行资源：从 OpenFicM GitHub、oh-story GitHub Release、Lorn.NovelWriteSkills 固定 commit 和 Hugging Face 获取，下载不执行远程脚本或 Hook
 - oh-story 更新：只读取正式 Release 和白名单 Markdown，绑定不可变 commit/tree SHA
 
+## 助手消息渲染
+
+助手回复按 Markdown 渲染（标题、列表、代码块、表格、引用、链接），用户消息保持纯文本。解析用 `markdown-it`，不引入原生依赖；`html: false` 并且不回显原始 HTML，链接只放行 `http`/`https`/`mailto`，图片只显示占位文字、不加载远程资源。纯函数 `src/markdown/markdown-parser.ts` 可脱离 RN 在 Node 里断言。
+
 ## 文风工作流
 
 - 文风书库接受 TXT、Markdown 和 EPUB；原文件及规范化正文保存在应用私有目录。

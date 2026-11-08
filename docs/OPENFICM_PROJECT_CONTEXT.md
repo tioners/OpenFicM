@@ -10,7 +10,7 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.10.3
+当前正式版本：0.12.0
 
 GitHub 仓库：
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.10.3 发布提交，以 v0.10.3 标签为准
-- 本轮审查基线：636358a docs: 记录 0.10.2 根因与验证结果
-- Release 标签：v0.10.3
+- 最新源码提交：本次 0.12.0 发布提交，以 v0.12.0 标签为准
+- 本轮审查基线：f79f64f feat(release): 0.11.0 错误重试可配置、任务可取消、整库备份与十余处修复
+- Release 标签：v0.12.0
 - Android applicationId：com.openfic.mobile
-- versionCode：21
-- versionName：0.10.3
+- versionCode：23
+- versionName：0.12.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.10.3.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.12.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.10.3 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版修复 GitHub issue #2 与 #3：maxHeight 弹层里的滚动容器缺 flexShrink，长内容时保存/提交按钮被顶出可视区（世界书、角色、结构化提问、设置页与写作页目录一并修掉）；助手页因整屏 loading 卸载重建消息列表导致滚动归零，现在进入定位到最新消息、仅在底部时跟随、切页保留位置，并新增“回到最新消息”悬浮按钮，详见 docs/releases/v0.10.3.md。0.10.2 及更早：0.10.2 修掉"删参考书后参考文风还在"的根因：`withExclusiveTransactionAsync` 跑在 expo-sqlite 新开的连接上，那条连接没打开 `PRAGMA foreign_keys`，导致独占事务里的级联删除/置空全部失效；依赖级联的删除改为显式删除，启动时加了一段幂等一致性修复清理历史孤儿，详见 docs/releases/v0.10.2.md。近几个版本：0.10.1 文风选择器统一并显示来源与内容（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）、0.9.0 参考文风改为每本一份持续演进（v0.9.0.md）。
+0.12.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版把助手回复改成 Markdown 渲染：标题、粗斜体、删除线、嵌套列表、引用、分隔线、行内代码、围栏代码块（等宽 + 横向滚动 + 语言名）与表格（保留对齐）都正常排版；`html: false` 且不回显原始 HTML，链接只放行 http/https/mailto，图片只显示占位不加载远程资源，用户消息保持纯文本，详见 docs/releases/v0.12.0.md。0.11.0 的改动（错误重试可配置、任务可取消、整库备份与十余处修复）见 docs/releases/v0.11.0.md，该版发布时本文件未同步更新，此轮补记。更早：0.10.3 弹层滚动与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 
@@ -105,7 +105,9 @@ GitHub 仓库：
 
 - src/screens/projects-screen.tsx：书架和作品入口。
 - src/screens/writing-screen.tsx：卷章目录、预览/编辑、保存和 Markdown 导出入口。
-- src/screens/assistant-screen.tsx：作品级助手会话、模型选择、消息编辑和重试。
+- src/screens/assistant-screen.tsx：作品级助手会话、模型选择、消息编辑和重试。助手消息用 `MarkdownView` 渲染，用户消息保持纯文本。
+- src/markdown/markdown-parser.ts：markdown-it 的纯函数封装（`html: false`、`breaks: true`），解析失败退回单段纯文本；纯 JS 无原生依赖，可脱离 RN 在 Node 里断言。
+- src/components/markdown-view.tsx：token → RN 组件。链接只放行 http/https/mailto，图片只显示占位不加载远程资源，代码块与表格横向滚动。
 - src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考文风与作者文风版本和作品级选择。
 - src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。
 - src/agent/runtime.ts：Agent 主循环、工具调用、结构化提问、子 Agent 协作和 trace。
