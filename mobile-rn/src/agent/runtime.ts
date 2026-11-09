@@ -270,28 +270,15 @@ function latestUserRequest(history: ChatMessage[]): string {
   return [...history].reverse().find((message) => message.role === "user")?.content.trim() ?? "";
 }
 
-function requiresKnowledgeSynchronization(content: string): boolean {
-  const hasKnowledgeSubject = /(创作思路|世界观|世界书|设定|角色|人物|关系|背景|阵营|势力|地点|规则|能力|剧情|情节)/.test(content);
-  const hasDecision = /(我想|我准备|我决定|确定|设定为|改成|改为|调整|新增|加入|删除|取消|更新|同步|补充|以后|接下来|让.+(?:成为|会|要))/.test(content);
-  return hasKnowledgeSubject && hasDecision;
-}
-
-function requiresAgentCollaboration(content: string): boolean {
-  if (/(多智能体|子智能体|agent|协作|分工)/i.test(content)) return true;
-  const hasAction = /(帮我|请|需要|设计|规划|分析|审查|检查|完善|调整|生成|构建|梳理|推演)/.test(content);
-  const dimensions = [
-    /(章节|正文|文风|对话)/,
-    /(剧情|情节|大纲|节奏|伏笔)/,
-    /(角色|人物|关系|弧光)/,
-    /(世界观|世界书|设定|背景|势力)/,
-  ].filter((pattern) => pattern.test(content)).length;
-  return hasAction && (dimensions >= 2 || (dimensions >= 1 && content.length >= 80));
-}
-
 function isWritingRequest(content: string): boolean {
   return /(正文|章节|续写|扩写|改写|重写|润色|仿写|写作|写(?:一|这|第|下|后|个).{0,8}章)/.test(content);
 }
 
+/**
+ * 只保留两类**用户明确说出技能名**的场景自动激活：文风蒸馏与文风进化。
+ * 其余技能一律交给模型依据提示词里的技能清单自行 activate_skill——
+ * 按关键词猜任务类型会在模型开口前就把对话推向"执行"，与上游"先澄清再动手"冲突。
+ */
 function requiredSkillForRequest(
   catalog: RuntimeCatalog,
   agent: AgentDefinition,
@@ -303,18 +290,7 @@ function requiredSkillForRequest(
     : /(蒸馏文风|分析小说文风|提取文笔\s*DNA)/i.test(request)
       ? "plugin-lorn-style--distillation"
       : null;
-  if (lornSkillId) return skills.find((skill) => skill.id === lornSkillId) ?? null;
-  if (!requiresAgentCollaboration(request) && !requiresKnowledgeSynchronization(request)) return null;
-  const preferredIds = /(审查|检查|质量|复盘)/.test(request)
-    ? ["builtin-skill--story-quality", "builtin-skill--reader-contract"]
-    : /(角色|人物|对白|对话|关系)/.test(request)
-      ? ["builtin-skill--character-design", "builtin-skill--character-relationship", "builtin-skill--dialogue-design"]
-      : /(正文|章节|续写|扩写|改写|润色)/.test(request)
-        ? ["builtin-skill--prose-format", "builtin-skill--story-quality", "builtin-skill--deslop-writing"]
-        : /(世界观|世界书|设定|背景|阵营|势力|创作思路)/.test(request)
-          ? ["builtin-skill--story-state-tracking", "builtin-skill--story-hooks"]
-          : ["builtin-skill--story-state-tracking", "builtin-skill--story-quality"];
-  return preferredIds.map((id) => skills.find((skill) => skill.id === id)).find(Boolean) ?? skills[0] ?? null;
+  return lornSkillId ? skills.find((skill) => skill.id === lornSkillId) ?? null : null;
 }
 
 function requiredArgument(args: Record<string, unknown>, key: string): string {
@@ -383,14 +359,14 @@ function systemPrompt(input: {
   consistencyReason: string | null;
   userRequest: string;
 }): string {
+  // 这一段刻意只保留"环境事实"，不放"去调用工具"的执行指令：
+  // 具体怎么干活由当前智能体定义（上游 build.yaml 的 <tone>/<proactive>/<execute_tasks>）决定，
+  // 否则移动端补的规则会盖过智能体自身的工作方式，表现为一问就动手、不和用户商量。
   const sections = [`你是 OpenFicM 移动端的 ${input.agent.name} 智能体。当前作品是《${input.project.title}》。
 作品简介：${input.project.description || "暂无"}
-作品、章节、角色、世界书和聊天记录都保存在本机；只有调用用户配置的模型 API 时联网。
+作品、章节、角色、世界书和笔记都保存在本机；只有调用用户配置的模型 API 时联网。
 必须依据工具读取到的当前作品数据工作，不得把其他作品的信息混入本作品。
-用户明确给出新的创作决定、角色变化、世界规则或剧情事实时，不要只在聊天中复述：先读取现有角色与世界书，确认属于正式设定后，调用 create/edit 工具同步到作品。若内容仍是脑暴、存在多种解释或是否采用尚不明确，先调用 ask_user 让用户确认，再写入；不得把未确认的备选想法当作正式设定。
-章节新增或修改后，优先根据当前正文判断角色或世界书是否真的发生变化；发现已确认的新事实时调用对应 create/edit 工具同步。不要为了形式上的检查阻塞当前任务，也不要在没有变化时反复读取全部资料。删除角色或世界书条目只响应用户明确要求。所有写工具仍受用户权限审批。
-任务存在会显著影响结果的偏好或歧义时，使用 ask_user 提出一至三个互不依赖的问题；简单问题不要反问。
-技能不能只凭名称假设内容；任务匹配技能说明时，先调用 activate_skill 加载完整指令。工具参数必须严格符合声明。`];
+所有写操作都受用户配置的工具权限约束；未获授权的写入不会生效。`];
 
   if (input.consistencyReason) {
     sections.push(`检测到需要关注的作品变动：${input.consistencyReason}\n优先根据当前任务判断是否需要同步角色或世界书；确认的新事实应写入对应资料，不要为了形式检查阻塞本轮任务。`);
@@ -819,15 +795,11 @@ export async function runAgent(input: {
   };
   const agent = activePrimaryAgent(agents, input.agentId ?? activeAgentId);
   const userRequest = latestUserRequest(input.history);
-  const delegates = enabledDelegates(catalog, agent);
-  const collaborationSuggested = requiresAgentCollaboration(userRequest)
-    && delegates.length > 0
-    && toolsForAgent(agent).some((tool) => tool.name === "delegate_agent")
-    && permissions.delegate_agent !== "deny";
-  const consistencyReason = pendingConsistency
-    || (requiresKnowledgeSynchronization(userRequest)
-      ? "用户本轮提供了可能影响角色或世界书的创作决定"
-      : null);
+  // 是否委派、是否需要同步设定，交给模型依据提示词决定。
+  // 此前用关键词预判"建议协作"和"必须同步设定"，会在模型开口前就把它推向执行，
+  // 与上游 <execute_tasks> 的"先澄清再动手"冲突，故只保留工具真实发生过变动时的一致性提示。
+  const collaborationSuggested = false;
+  const consistencyReason = pendingConsistency || null;
   const requiredSkill = requiredSkillForRequest(catalog, agent, userRequest);
   const recorder = createTraceRecorder(agent, collaborationSuggested, input.onTrace);
 

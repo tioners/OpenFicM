@@ -113,6 +113,12 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 
 写作页改为预览优先并支持章节、卷、全书 Markdown 导出；助手增加失败请求重试和历史用户消息编辑，编辑点之后的线性上下文通过事务统一重建。
 
+### 2026-11-09 - 去掉关键词预判，让模型自行决定何时提问
+
+用户反馈助手"一发消息就调工具、不大沟通"，与上游差异明显。对比上游 `efcfd94` 的 `build.yaml` 后发现提示词逐字节相同且已打进内容包，问题出在运行时：移动端有一组关键词正则，在调用模型**之前**就替模型做了决定——`requiresAgentCollaboration` 决定"建议协作"、`requiresKnowledgeSynchronization` 决定"需要同步设定"并注入"确认的新事实应写入"、`requiredSkillForRequest` 按关键词直接锁定技能。同时系统提示首段连发 6 条"去调用工具"的指令，把上游 `<tone>`/`<proactive>`/`<execute_tasks>` 里"先澄清再动手"的优先级盖了过去。
+
+本版移除两个预判函数与其注入，`requiredSkillForRequest` 只保留用户明确说出"蒸馏文风/更新我的文风"时的技能激活，系统提示首段改为只陈述环境事实（作品存在本机、联网边界、写操作受权限约束）。是否提问、是否委派、是否同步设定，交回模型依据智能体定义判断。章节写入后的一致性提示保留——那是事后触发，不会抢先驱动模型。
+
 ### 2026-11-09 - 助手回复支持 Markdown 渲染
 
 助手回复此前是一条 `<Text>`，`**粗体**`、`## 标题`、代码块和表格都原样露出。新增 `src/markdown/markdown-parser.ts`（markdown-it 纯函数封装）与 `src/components/markdown-view.tsx`（token → RN 组件），支持标题、粗斜体、删除线、嵌套列表、引用块、分隔线、行内代码、围栏代码块（等宽 + 横向滚动 + 语言名）与表格（保留对齐、横向滚动）。安全取舍：`html: false` 且不回显原始 HTML，链接只放行 http/https/mailto（markdown-it 自身还会挡掉 `javascript:`/`data:`/`vbscript:`），图片只显示 `[图片：说明]` 占位而不加载远程资源。用户消息保持纯文本，避免把用户输入擅自解析成列表。解析结果按消息内容 `useMemo` 缓存，流式刷新时不重建。
