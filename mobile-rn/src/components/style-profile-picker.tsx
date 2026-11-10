@@ -5,6 +5,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { SheetBackdrop } from "@/components/ui";
 import { describeStyleProfileOption, type StyleProfileOption } from "@/style/profile-options";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { StyleProfile } from "@/types";
 
 /**
@@ -133,7 +134,7 @@ export function StyleProfilePickerSheet(input: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   sheet: { maxHeight: "86%", borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, backgroundColor: colors.background },
   header: { minHeight: 70, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingLeft: spacing.sm, paddingRight: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   headerCopy: { flex: 1, minWidth: 0, paddingVertical: spacing.sm },
@@ -145,10 +146,10 @@ const styles = StyleSheet.create({
   previewContent: { padding: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xxl },
   previewMeta: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   previewText: { color: colors.text, fontSize: 14, lineHeight: 22 },
-  notice: { flexDirection: "row", alignItems: "flex-start", gap: spacing.xs, padding: spacing.sm, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  notice: { flexDirection: "row", alignItems: "flex-start", gap: spacing.xs, padding: spacing.sm, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   noticeText: { flex: 1, color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   row: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
-  rowActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
+  rowActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   rowMain: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md },
   rowCopy: { flex: 1, minWidth: 0, gap: 3 },
   rowTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
@@ -157,4 +158,4 @@ const styles = StyleSheet.create({
   previewButton: { width: 52, minHeight: 44, alignItems: "center", justifyContent: "center", gap: 2, marginRight: spacing.xs },
   previewButtonText: { color: colors.primary, fontSize: 11, fontWeight: "700" },
   emptyHint: { color: colors.textMuted, fontSize: 13, lineHeight: 20, padding: spacing.md },
-});
+}));

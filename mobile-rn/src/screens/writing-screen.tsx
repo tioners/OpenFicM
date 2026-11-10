@@ -47,6 +47,7 @@ import { evolveAuthorStyle } from "@/settings/lorn-style-plugin";
 import { listStyleProfileOptions, type StyleProfileOption } from "@/style/profile-options";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Chapter, ChapterDraftSnapshot, Project, StyleProfile, Volume } from "@/types";
 
 const AUTO_SAVE_DELAY_MS = 1_000;
@@ -846,7 +847,7 @@ export function WritingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   flex: { flex: 1 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   muted: { color: colors.textMuted, fontSize: 15, padding: spacing.lg, textAlign: "center" },
@@ -971,4 +972,4 @@ const styles = StyleSheet.create({
   nameDialog: { gap: spacing.lg, padding: spacing.xl, borderRadius: radius.md, backgroundColor: colors.background },
   nameDialogTitle: { color: colors.text, fontSize: 20, fontWeight: "700" },
   nameDialogActions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm },
-});
+}));

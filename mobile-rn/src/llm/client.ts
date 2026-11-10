@@ -311,15 +311,60 @@ async function callOpenAiResponses(
   return { content: turn.content, toolCalls: turn.toolCalls };
 }
 
+/** Gemini 只接受 OpenAPI 子集，这些 JSON Schema 关键字会被 400 拒绝。 */
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  "$schema", "$id", "$defs", "$ref", "definitions", "additionalProperties",
+  "default", "title", "examples", "const", "oneOf", "anyOf", "allOf", "not",
+  "if", "then", "else", "format", "deprecated", "readOnly", "writeOnly",
+  "patternProperties", "propertyNames", "unevaluatedProperties", "contentMediaType", "contentEncoding",
+]);
+
+/**
+ * 把 properties 映射转换成 Gemini 的 schema 字典。
+ *
+ * 关键：properties 的值是"名字 → schema"的映射，**映射本身不是 schema**，
+ * 不能给它补 type。此前把映射递归进了 toGeminiSchema，导致末尾的
+ * `if (!output.type) output.type = "STRING"` 把整个映射变成
+ * `properties: { paramA: {...}, type: "STRING" }`——Gemini 于是把 "type"
+ * 当成一个名叫 type 的伪参数，而它的值是字符串，直接 400。
+ */
+function toGeminiProperties(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const output: Record<string, unknown> = {};
+  for (const [name, schema] of Object.entries(value)) {
+    // 属性名必须是合法标识符；schema 为字符串时按类型简写包装。
+    if (typeof schema === "string") output[name] = { type: schema.toUpperCase() };
+    else if (isRecord(schema)) output[name] = toGeminiSchema(schema);
+    else output[name] = { type: "STRING" };
+  }
+  return output;
+}
+
 function toGeminiSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(toGeminiSchema);
+  // 注意：这里**不能**把任意字符串都包装成 { type }，否则 description 这类
+  // 普通字符串值会被误写成 schema。类型简写只在 properties / items 处处理。
   if (!value || typeof value !== "object") return value;
   const source = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(source)) {
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
     if (key === "type" && typeof item === "string") output[key] = item.toUpperCase();
-    else if (key === "required" && Array.isArray(item) && item.length === 0) continue;
-    else if (key !== "additionalProperties") output[key] = toGeminiSchema(item);
+    else if (key === "required" && Array.isArray(item)) {
+      // Gemini 不接受空 required 数组
+      const names = item.filter((entry): entry is string => typeof entry === "string");
+      if (names.length) output.required = names;
+    } else if (key === "properties") {
+      const properties = toGeminiProperties(item);
+      if (properties && Object.keys(properties).length) output.properties = properties;
+    } else if (key === "items") {
+      output.items = typeof item === "string" ? { type: item.toUpperCase() } : toGeminiSchema(item);
+    } else if (key === "enum" && Array.isArray(item)) {
+      // Gemini 的 enum 必须是字符串数组
+      output.enum = item.map((entry) => String(entry));
+    } else {
+      output[key] = toGeminiSchema(item);
+    }
   }
   if (!output.type && isRecord(source.properties)) output.type = "OBJECT";
   if (!output.type && source.items) output.type = "ARRAY";
@@ -378,11 +423,18 @@ async function callGemini(
       systemInstruction: system ? { parts: [{ text: system }] } : undefined,
       contents: geminiContents(messages),
       ...(tools.length ? {
-        tools: [{ functionDeclarations: tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          parameters: toGeminiSchema(tool.parameters),
-        })) }],
+        tools: [{ functionDeclarations: tools.map((tool) => {
+          const parameters = toGeminiSchema(tool.parameters);
+          // 无参数工具不要发空 parameters：Gemini 对没有 properties 的 OBJECT 兼容性不一致。
+          const hasParameters = isRecord(parameters)
+            && isRecord((parameters as Record<string, unknown>).properties)
+            && Object.keys((parameters as Record<string, unknown>).properties as object).length > 0;
+          return {
+            name: tool.name,
+            description: tool.description,
+            ...(hasParameters ? { parameters } : {}),
+          };
+        }) }],
       } : {}),
       generationConfig: {
         temperature: selection.model.temperature,

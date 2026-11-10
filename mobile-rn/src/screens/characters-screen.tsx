@@ -21,6 +21,7 @@ import { exportCharacters, type LibraryExportFormat } from "@/lib/export";
 import type { RootStackParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Character, Project } from "@/types";
 
 export function CharactersScreen() {
@@ -233,7 +234,7 @@ export function CharactersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center" },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   searchWrap: { padding: spacing.lg, paddingBottom: spacing.sm },
@@ -243,7 +244,7 @@ const styles = StyleSheet.create({
   row: { minHeight: 98, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   rowPressed: { backgroundColor: colors.surfaceMuted },
   avatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
-  avatarText: { color: "#FFFFFF", fontSize: 22, fontWeight: "700" },
+  avatarText: { color: colors.onPrimary, fontSize: 22, fontWeight: "700" },
   rowText: { flex: 1, minWidth: 0, gap: spacing.xs },
   rowActions: { flexDirection: "row", alignItems: "center" },
   nameLine: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
@@ -260,4 +261,4 @@ const styles = StyleSheet.create({
   switchRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   switchLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm },
-});
+}));

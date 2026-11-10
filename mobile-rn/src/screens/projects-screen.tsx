@@ -12,6 +12,7 @@ import { exportBackup } from "@/lib/backup";
 import type { RootStackParamList, RootTabParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Project } from "@/types";
 
 export function ProjectsScreen() {
@@ -174,7 +175,7 @@ export function ProjectsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   quickActions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   quickAction: { flex: 1, minHeight: 54, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surface },
@@ -187,7 +188,7 @@ const styles = StyleSheet.create({
   row: { minHeight: 92, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   rowPressed: { backgroundColor: colors.surfaceMuted },
   cover: { width: 56, height: 68, borderRadius: radius.sm, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
-  coverText: { color: "#FFFFFF", fontSize: 24, fontWeight: "700" },
+  coverText: { color: colors.onPrimary, fontSize: 24, fontWeight: "700" },
   rowText: { flex: 1, gap: spacing.xs },
   rowAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   title: { color: colors.text, fontSize: 17, fontWeight: "700" },
@@ -196,4 +197,4 @@ const styles = StyleSheet.create({
   modalBody: { gap: spacing.lg, padding: spacing.xl, borderRadius: radius.md, backgroundColor: colors.background },
   modalTitle: { color: colors.text, fontSize: 20, fontWeight: "700" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm },
-});
+}));

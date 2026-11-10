@@ -113,6 +113,26 @@ Gemini function declaration 使用大写 Schema 类型，并移除不受支持�
 
 写作页改为预览优先并支持章节、卷、全书 Markdown 导出；助手增加失败请求重试和历史用户消息编辑，编辑点之后的线性上下文通过事务统一重建。
 
+### 2026-11-11 - 夜间模式
+
+新增浅色/深色/跟随系统三种模式。难点在于项目里 `.colors.x` 有 487 处、14 个文件都在模块顶层调用 `StyleSheet.create`，而样式在模块加载时就把颜色定死了，运行时切换不会生效。
+
+做法：`theme.ts` 导出两套调色板和一个读取"当前配色"的代理 `colors`；`themed-styles.ts` 提供 `themedStyles((colors) => StyleSheet.create({...}))`，按明暗分别缓存样式表。样式工厂的参数会遮蔽模块级同名导入，所以 14 个文件的样式块只需把 `StyleSheet.create` 包一层，487 处引用一处都不用改。渲染期的 `colors.x` 通过代理实时解析。
+
+同时把 8 处写死的十六进制颜色收进调色板（`primarySoft`、`primarySoftStrong`、`dangerSoft`、`dangerBorder`、`onPrimary`、`shadow`），否则暗色下会出现白底绿框不协调的问题。导航容器和状态栏也跟随配色，避免切页闪白。选择保存在 `general.themeMode`。
+
+### 2026-11-11 - 断连后的执行记录
+
+网络超时时 `runAgentLoop` 里的 messages 是局部数组，工具调用结果只存在于内存；重试只回放用户消息，模型以为"什么都没干"，会重复写章节、重复改设定。
+
+现在：执行前先落一条 `taskStatus: "running"` 的占位 assistant 消息，工具状态变化时节流写库（断连/被杀后仍能看到"哪些写操作已执行、哪些结果未知"）；失败时把占位消息改写成失败记录，而不是再插一条。重试时 `execution-record.ts` 从 trace 里提取已完成的**写操作**（读操作跳过，重跑无副作用），压成一条摘要作为 assistant 消息注入历史，并明确告知"不要重复执行"；断连时仍在执行的步骤会提示"可能已写入，先核对"。连续重试会把前几轮的记录累加（`priorExecutionRecord`），不会因为第二次失败丢掉第一次的进度。
+
+### 2026-11-11 - 修复 Gemini 工具 schema 导致 HTTP 400
+
+Gemini 官方 API 一调用就 400。根因在 `toGeminiSchema`：它把 `properties` 那个"参数名 → schema"的**映射本身**也当成 schema 递归了一遍，末尾 `if (!output.type) output.type = "STRING"` 于是给映射补了个 `type: "STRING"`。结果每个工具的 `properties` 里都多出一个叫 `type` 的伪参数，值是字符串，而 Gemini 要求 `properties.*` 的值必须是对象。
+
+修复：拆出 `toGeminiProperties` 专门处理映射（只负责把每个值转成 schema，绝不给映射补 `type`），并剔除 Gemini 不支持的 JSON Schema 关键字（`additionalProperties`、`$schema`、`default`、`title`、`oneOf` 等），空 `required` 数组不再发送，`enum` 统一为字符串数组，无参数工具不发空 `parameters`。用真实 34 个工具定义跑断言验证：53 个属性节点全部合法、最大数组嵌套 2 层正确、无伪参数。
+
 ### 2026-11-09 - 去掉关键词预判，让模型自行决定何时提问
 
 用户反馈助手"一发消息就调工具、不大沟通"，与上游差异明显。对比上游 `efcfd94` 的 `build.yaml` 后发现提示词逐字节相同且已打进内容包，问题出在运行时：移动端有一组关键词正则，在调用模型**之前**就替模型做了决定——`requiresAgentCollaboration` 决定"建议协作"、`requiresKnowledgeSynchronization` 决定"需要同步设定"并注入"确认的新事实应写入"、`requiredSkillForRequest` 按关键词直接锁定技能。同时系统提示首段连发 6 条"去调用工具"的指令，把上游 `<tone>`/`<proactive>`/`<execute_tasks>` 里"先澄清再动手"的优先级盖了过去。

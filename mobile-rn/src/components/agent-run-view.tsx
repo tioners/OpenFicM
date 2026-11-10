@@ -13,6 +13,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { Button } from "@/components/ui";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type {
   AgentClarificationAnswer,
   AgentClarificationRequest,
@@ -314,7 +315,7 @@ export function AgentQuestionSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   trace: {
     overflow: "hidden",
     borderWidth: 1,
@@ -322,7 +323,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.surface,
   },
-  traceError: { borderColor: "#E4B4AE" },
+  traceError: { borderColor: colors.dangerBorder },
   traceHeader: {
     minHeight: 58,
     flexDirection: "row",
@@ -352,7 +353,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    backgroundColor: "#E8F2EE",
+    backgroundColor: colors.primarySoft,
   },
   collaborationText: { flex: 1, color: colors.primary, fontSize: 12, fontWeight: "600" },
   event: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
@@ -397,7 +398,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.sm,
-    backgroundColor: "#E8F2EE",
+    backgroundColor: colors.primarySoft,
   },
   questionHeaderCopy: { flex: 1, minWidth: 0 },
   questionSheetTitle: { color: colors.text, fontSize: 17, fontWeight: "700" },
@@ -423,7 +424,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.surface,
   },
-  optionSelected: { borderColor: colors.primary, backgroundColor: "#E8F2EE" },
+  optionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   optionCopy: { flex: 1, minWidth: 0 },
   optionLabel: { color: colors.text, fontSize: 14, fontWeight: "600" },
   optionLabelSelected: { color: colors.primary },
@@ -452,4 +453,4 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-});
+}));

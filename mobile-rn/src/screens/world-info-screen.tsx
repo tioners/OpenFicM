@@ -28,6 +28,7 @@ import { exportWorldInfo, type LibraryExportFormat } from "@/lib/export";
 import type { RootStackParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Project, WorldInfo, WorldInfoEntry } from "@/types";
 
 export function WorldInfoScreen() {
@@ -253,7 +254,7 @@ export function WorldInfoScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   flex: { flex: 1 },
   headerActions: { flexDirection: "row", alignItems: "center" },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
@@ -284,4 +285,4 @@ const styles = StyleSheet.create({
   switchRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   switchLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm },
-});
+}));

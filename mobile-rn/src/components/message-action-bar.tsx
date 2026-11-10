@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 
 export function MessageActionBar({
   content,
@@ -54,7 +55,7 @@ export function MessageActionBar({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   bar: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm },
   action: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.xs },
   prominentAction: { paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.danger, borderRadius: 6 },
@@ -62,4 +63,4 @@ const styles = StyleSheet.create({
   prominentText: { color: colors.danger },
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.65 },
-});
+}));

@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.12.1
+当前正式版本：0.13.0
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.12.1
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.13.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.12.1 发布提交，以 v0.12.1 标签为准
+- 最新源码提交：本次 0.13.0 发布提交，以 v0.13.0 标签为准
 - 本轮审查基线：7aac016 feat(mobile): 助手回复支持 Markdown 渲染
-- Release 标签：v0.12.1
+- Release 标签：v0.13.0
 - Android applicationId：com.openfic.mobile
-- versionCode：24
-- versionName：0.12.1
+- versionCode：25
+- versionName：0.13.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.12.1.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.13.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.12.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版处理"助手一发消息就调工具、不大沟通"：对比上游 `efcfd94` 后确认提示词逐字节相同且已打进内容包，问题出在移动端运行时用关键词正则替模型预判——`requiresAgentCollaboration`（建议协作）、`requiresKnowledgeSynchronization`（注入"确认的新事实应写入"）、`requiredSkillForRequest`（按关键词锁定技能），再加上系统提示首段连发 6 条执行指令，把上游 `<execute_tasks>` 的"先澄清再动手"盖了过去。本版移除两个预判函数，技能自动激活只保留用户明确说出"蒸馏/更新文风"，首段改为只陈述环境事实，详见 docs/releases/v0.12.1.md。0.12.0 把助手回复改成 Markdown 渲染（标题、列表、代码块、表格；`html: false`、链接白名单、图片不加载远程资源），见 v0.12.0.md。0.11.0 的改动见 v0.11.0.md，该版发布时本文件未同步更新，此轮已补记。更早：0.10.3 弹层滚动与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
+0.13.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版三件事：① 新增夜间模式（跟随系统/浅色/深色），做法是 `theme.ts` 的调色板代理 + `themed-styles.ts` 按明暗缓存样式表，14 个文件的样式块只包一层，487 处 `colors.x` 无需逐个改；② 断连后的执行记录：执行前落占位消息、失败时改写、重试时把已完成的写操作摘要注入历史，避免重复写章节，详见 docs/releases/v0.13.0.md；③ 修复 Gemini 官方接口一律 400——`toGeminiSchema` 把 `properties` 映射本身当成 schema，给每个工具塞了个值为字符串的伪参数 `type`。0.12.1 去掉关键词预判（助手不再一问就动手，见 v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 

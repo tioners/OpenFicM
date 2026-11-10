@@ -39,6 +39,7 @@ import { useStyleDistillationStore } from "@/style/distillation-store";
 import { cancelStyleDistillation, startStyleDistillation } from "@/style/distillation-runner";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { StyleProfile, StyleSource } from "@/types";
 
 function formatBytes(value: number): string {
@@ -644,7 +645,7 @@ function ProfileRow({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   errorWrap: { padding: spacing.lg, paddingBottom: 0 },
@@ -652,17 +653,17 @@ const styles = StyleSheet.create({
   emptyList: { flexGrow: 1, paddingBottom: spacing.xl },
   headerContent: { padding: spacing.lg, paddingBottom: spacing.sm },
   intro: { flexDirection: "row", gap: spacing.md, paddingBottom: spacing.lg },
-  introIcon: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  introIcon: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   introCopy: { flex: 1, gap: spacing.xs },
   introTitle: { color: colors.text, fontSize: 17, fontWeight: "700" },
   introText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
-  taskBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  taskBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   taskBannerCopy: { flex: 1, minWidth: 0, gap: 3 },
   taskBannerTitle: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   taskBannerText: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   taskBannerAction: { minWidth: 52, minHeight: 44, alignItems: "center", justifyContent: "center" },
   taskBannerActionText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
-  activeStrip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  activeStrip: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   activeStripText: { flex: 1, color: colors.primary, fontSize: 13, fontWeight: "600" },
   clearActive: { minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.sm },
   clearActiveText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
@@ -671,12 +672,12 @@ const styles = StyleSheet.create({
   sectionMeta: { color: colors.textMuted, fontSize: 12 },
   sourceRow: { minHeight: 84, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   sourceRowPressed: { backgroundColor: colors.surfaceMuted },
-  bookIcon: { width: 48, height: 56, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: "#DCECE6" },
+  bookIcon: { width: 48, height: 56, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: colors.primarySoftStrong },
   sourceCopy: { flex: 1, minWidth: 0, gap: 3 },
   sourceTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
   sourceMeta: { color: colors.textMuted, fontSize: 12 },
   profileRow: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm, paddingLeft: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
-  profileRowActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
+  profileRowActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   profileMain: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
   profileCopy: { flex: 1, minWidth: 0, gap: 3 },
   profileName: { color: colors.text, fontSize: 14, fontWeight: "700" },
@@ -696,10 +697,10 @@ const styles = StyleSheet.create({
   inlineActions: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   secondaryIconAction: { width: 46, height: 46, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
   helperText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
-  checkpointBox: { gap: spacing.xs, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  checkpointBox: { gap: spacing.xs, padding: spacing.md, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   checkpointTitle: { color: colors.primary, fontSize: 13, fontWeight: "700" },
   checkpointText: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   emptyHint: { color: colors.textMuted, fontSize: 14, lineHeight: 20, paddingVertical: spacing.md },
   guideText: { color: colors.text, fontSize: 14, lineHeight: 22 },
   guideInput: { minHeight: 300 },
-});
+}));

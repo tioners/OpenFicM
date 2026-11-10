@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, DarkTheme, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -17,7 +17,9 @@ import { StyleLibraryScreen } from "@/screens/style-library-screen";
 import { WritingScreen } from "@/screens/writing-screen";
 import { NotesScreen } from "@/screens/notes-screen";
 import { WorldInfoScreen } from "@/screens/world-info-screen";
-import { colors } from "@/theme";
+import { colors, getThemeMode, setSystemScheme, setThemeMode, useResolvedScheme, type ThemeMode } from "@/theme";
+import { themedStyles } from "@/themed-styles";
+import { getSetting } from "@/data/repositories";
 import { installMissingRuntimeResources, getRuntimeResourceState, type RuntimeResourceState } from "@/settings/remote-resources";
 import { warmUpLocalModels } from "@/search/local-models";
 
@@ -26,6 +28,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  // 订阅明暗变化：标签栏颜色在渲染期取当前配色，切换后需要重渲染。
+  useResolvedScheme();
 
   return (
     <Tab.Navigator
@@ -61,7 +65,33 @@ function MainTabs() {
   );
 }
 
+const THEME_SETTING_KEY = "general.themeMode";
+
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
+
 export default function App() {
+  const systemScheme = useColorScheme();
+  // 系统明暗变化时同步给主题层（只有"跟随系统"会真正影响配色）。
+  useEffect(() => {
+    setSystemScheme(systemScheme === "dark" ? "dark" : "light");
+  }, [systemScheme]);
+  // 启动时读取用户选择的模式。默认跟随系统，避免首次进入与系统外观冲突。
+  useEffect(() => {
+    let cancelled = false;
+    void getSetting(THEME_SETTING_KEY)
+      .then((stored) => {
+        if (cancelled) return;
+        setThemeMode(isThemeMode(stored) ? stored : "system");
+      })
+      .catch(() => {
+        if (!cancelled && getThemeMode() === "light") setThemeMode("system");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <SafeAreaProvider>
       <KeyboardProvider preserveEdgeToEdge>
@@ -72,6 +102,8 @@ export default function App() {
 }
 
 function RuntimeResourceGate() {
+  const scheme = useResolvedScheme();
+  const statusBarStyle = scheme === "dark" ? "light" : "dark";
   const [state, setState] = useState<RuntimeResourceState | null>(null);
   const [warmed, setWarmed] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -138,7 +170,7 @@ function RuntimeResourceGate() {
     const resourcesReady = state?.ready === true;
     return (
       <View style={styles.resourceGate}>
-        <StatusBar style="dark" />
+        <StatusBar style={statusBarStyle} />
         <Text style={styles.resourceTitle}>{resourcesReady ? "预热本地检索" : "准备 OpenFicM"}</Text>
         <Text style={styles.resourceSubtitle}>{resourcesReady ? "运行资源已完整，进入应用前需要加载嵌入和重排模型。" : "首次使用需要下载 Agent、Skill 和本地检索模型。"}</Text>
         <View style={styles.resourceList}>
@@ -154,7 +186,7 @@ function RuntimeResourceGate() {
         </View>
         <Text style={styles.resourceProgress}>{error ?? progress}</Text>
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void (resourcesReady ? checkAndWarm() : download())} style={[styles.downloadButton, busy && styles.downloadButtonDisabled]}>
-          {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.downloadButtonText}>{resourcesReady ? "重新预热" : "一键拉取并预热"}</Text>}
+          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.downloadButtonText}>{resourcesReady ? "重新预热" : "一键拉取并预热"}</Text>}
         </Pressable>
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void checkAndWarm()} style={styles.retryResourceButton}>
           <Text style={styles.retryResourceText}>重新检查</Text>
@@ -164,12 +196,27 @@ function RuntimeResourceGate() {
   }
 
   if (busy) {
-    return <View style={styles.resourceLoading}><StatusBar style="dark" /><ActivityIndicator size="large" color={colors.primary} /><Text style={styles.resourceProgress}>{progress}</Text></View>;
+    return <View style={styles.resourceLoading}><StatusBar style={statusBarStyle} /><ActivityIndicator size="large" color={colors.primary} /><Text style={styles.resourceProgress}>{progress}</Text></View>;
   }
 
+  // 导航容器自己也画背景：不给它暗色主题时，切页会闪一下系统白底。
+  const baseTheme = scheme === "dark" ? DarkTheme : DefaultTheme;
+  const navigationTheme = {
+    ...baseTheme,
+    colors: {
+      ...baseTheme.colors,
+      background: colors.background,
+      card: colors.surface,
+      text: colors.text,
+      border: colors.border,
+      primary: colors.primary,
+      notification: colors.accent,
+    },
+  };
+
   return (
-    <NavigationContainer>
-      <StatusBar style="dark" />
+    <NavigationContainer theme={navigationTheme}>
+      <StatusBar style={statusBarStyle} />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="Characters" component={CharactersScreen} />
@@ -181,7 +228,7 @@ function RuntimeResourceGate() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   resourceGate: { flex: 1, justifyContent: "center", padding: 28, backgroundColor: colors.background },
   resourceLoading: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, backgroundColor: colors.background },
   resourceTitle: { color: colors.text, fontSize: 28, fontWeight: "800" },
@@ -198,4 +245,4 @@ const styles = StyleSheet.create({
   downloadButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
   retryResourceButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginTop: 8 },
   retryResourceText: { color: colors.primary, fontSize: 14, fontWeight: "700" },
-});
+}));

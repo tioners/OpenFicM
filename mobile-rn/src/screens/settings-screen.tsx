@@ -23,6 +23,7 @@ import type { RootStackParamList } from "@/navigation/types";
 import { SettingsCategoryScreen, type SettingsCategory } from "@/screens/settings-category-screen";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Model, OpenAiApiMode, Provider, ProviderType } from "@/types";
 
 const providerDefaults: Record<ProviderType, { name: string; url: string }> = {
@@ -634,11 +635,11 @@ export function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   categoryList: { paddingVertical: spacing.sm },
   categoryRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   categoryRowPressed: { backgroundColor: colors.surfaceMuted },
-  categoryIcon: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: "#E6F3EF" },
+  categoryIcon: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   categoryLabel: { flex: 1, color: colors.text, fontSize: 16, fontWeight: "600" },
   section: { padding: spacing.lg, gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   errorWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
@@ -669,7 +670,7 @@ const styles = StyleSheet.create({
   fieldHint: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: -spacing.sm },
   providerChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   choice: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md },
-  choiceActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
+  choiceActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   choiceText: { color: colors.textMuted, fontSize: 13 },
   choiceTextActive: { color: colors.primary, fontWeight: "700" },
   // 父层只有 maxHeight，ScrollView/FlatList 默认不收缩会把超出部分顶出可视区且滚不动，必须允许它收缩。
@@ -680,4 +681,4 @@ const styles = StyleSheet.create({
   modelFilterEmpty: { padding: spacing.lg, color: colors.textMuted, fontSize: 14, lineHeight: 20 },
   sheetHeader: { minHeight: 64, flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   remoteModelRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-});
+}));

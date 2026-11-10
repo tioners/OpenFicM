@@ -13,6 +13,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 
 export function Screen({ children, scroll = false }: PropsWithChildren<{ scroll?: boolean }>) {
   return (
@@ -81,7 +82,7 @@ export function Button({
         (pressed || disabled) && styles.buttonPressed,
       ]}
     >
-      {loading ? <ActivityIndicator color={variant === "secondary" ? colors.text : "#FFFFFF"} /> : (
+      {loading ? <ActivityIndicator color={variant === "secondary" ? colors.text : colors.onPrimary} /> : (
         <Text style={[styles.buttonText, variant === "secondary" && styles.buttonTextSecondary]}>{label}</Text>
       )}
     </Pressable>
@@ -127,7 +128,7 @@ export function SheetBackdrop({ onPress, children }: PropsWithChildren<{ onPress
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   sheetBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: colors.overlay },
   screen: { flex: 1, backgroundColor: colors.background },
   scroll: { paddingBottom: 40 },
@@ -168,7 +169,7 @@ const styles = StyleSheet.create({
   buttonSecondary: { backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
   buttonDanger: { backgroundColor: colors.danger },
   buttonPressed: { opacity: 0.64 },
-  buttonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
+  buttonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
   buttonTextSecondary: { color: colors.text },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, padding: spacing.xl },
   emptyTitle: { color: colors.textMuted, fontSize: 16, textAlign: "center" },
@@ -180,9 +181,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
-    backgroundColor: "#FDECEA",
+    backgroundColor: colors.dangerSoft,
   },
   errorText: { flex: 1, color: colors.danger, fontSize: 13, lineHeight: 19 },
   retryButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   retryText: { color: colors.danger, fontSize: 13, fontWeight: "700" },
-});
+}));

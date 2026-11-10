@@ -63,7 +63,8 @@ import {
   CURRENT_APP_VERSION,
   type AppUpdateInfo,
 } from "@/settings/app-update";
-import { colors, radius, spacing } from "@/theme";
+import { colors, getThemeMode, radius, setThemeMode, spacing, type ThemeMode } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type { Model } from "@/types";
 
 export type SettingsCategory =
@@ -146,6 +147,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const [compression, setCompression] = useState(false);
   const [autoSaveDelay, setAutoSaveDelay] = useState("1000");
   const [editorFontSize, setEditorFontSize] = useState("17");
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
   const [requestTimeout, setRequestTimeout] = useState("120000");
   const [maxAttempts, setMaxAttempts] = useState("3");
   const [maxServerErrorAttempts, setMaxServerErrorAttempts] = useState("2");
@@ -531,6 +533,29 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={() => void load()} /></View> : null}
       {category === "general" ? (
         <View style={styles.section}>
+          <Text style={styles.fieldLabel}>夜间模式</Text>
+          <View style={styles.themeRow}>
+            {([
+              ["system", "跟随系统"],
+              ["light", "浅色"],
+              ["dark", "深色"],
+            ] as Array<[ThemeMode, string]>).map(([value, label]) => (
+              <Pressable
+                key={value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: themeMode === value }}
+                onPress={() => {
+                  setThemeModeState(value);
+                  setThemeMode(value);
+                  void savePreference("general.themeMode", value);
+                }}
+                style={[styles.themeOption, themeMode === value && styles.themeOptionActive]}
+              >
+                <Text style={[styles.themeOptionText, themeMode === value && styles.themeOptionTextActive]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.fieldHint}>跟随系统时会随手机的深色模式自动切换；改动立即生效，不需要重启。</Text>
           <Field label="自动保存延迟（毫秒）" value={autoSaveDelay} onChangeText={setAutoSaveDelay} onBlur={() => void savePreference("general.autoSaveDelay", autoSaveDelay)} keyboardType="number-pad" />
           <Field label="编辑器字号" value={editorFontSize} onChangeText={setEditorFontSize} onBlur={() => void savePreference("general.editorFontSize", editorFontSize)} keyboardType="number-pad" />
           <SettingRow label="数据位置" value="本机 SQLite · API Key 使用 SecureStore" />
@@ -761,7 +786,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   errorWrap: { padding: spacing.lg, paddingBottom: 0 },
   section: { gap: spacing.md, padding: spacing.lg },
@@ -769,6 +794,12 @@ const styles = StyleSheet.create({
   subsectionDivider: { height: StyleSheet.hairlineWidth, marginVertical: spacing.sm, backgroundColor: colors.border },
   sectionHint: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
   fieldHint: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: -spacing.sm },
+  fieldLabel: { color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: -spacing.sm },
+  themeRow: { flexDirection: "row", gap: spacing.sm },
+  themeOption: { flex: 1, minHeight: 42, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
+  themeOptionActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  themeOptionText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  themeOptionTextActive: { color: colors.primary, fontWeight: "700" },
   settingRow: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   settingLabel: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
   settingValue: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 19, textAlign: "right" },
@@ -776,7 +807,7 @@ const styles = StyleSheet.create({
   permissionText: { flex: 1, minWidth: 0 },
   permissionMode: { minWidth: 64, color: colors.primary, fontSize: 13, fontWeight: "700", textAlign: "right" },
   manageRow: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, paddingLeft: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm },
-  activeRow: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
+  activeRow: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   manageText: { flex: 1, minWidth: 0, gap: spacing.xs },
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   multiline: { minHeight: 120 },
@@ -786,7 +817,7 @@ const styles = StyleSheet.create({
   modelHint: { color: colors.primary, fontSize: 12 },
   modelChoices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   modelChoice: { maxWidth: "100%", minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm },
-  modelChoiceActive: { borderColor: colors.primary, backgroundColor: "#E6F3EF" },
+  modelChoiceActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   modelChoiceText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   dangerText: { color: colors.danger },
-});
+}));

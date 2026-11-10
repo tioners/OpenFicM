@@ -686,6 +686,30 @@ export async function listMessages(sessionId: string): Promise<ChatMessage[]> {
   )).map(mapMessage);
 }
 
+/** 就地更新消息正文。配合 updateMessageMetadata 用于"占位消息 → 最终结果"。 */
+export async function updateMessageContent(messageId: string, content: string): Promise<void> {
+  if (!content.trim()) throw new Error("消息内容不能为空");
+  const db = await getDatabase();
+  await db.runAsync("UPDATE chat_messages SET content = ? WHERE id = ?", content, messageId);
+}
+
+/**
+ * 就地更新一条消息的 metadata。
+ * 用于"执行前先落一条进行中的占位记录、结束后改成完成"——即使 App 被杀或网络断开，
+ * 也能从库里看出某个写操作到底执行到了哪一步，避免盲目重试造成重复写入。
+ */
+export async function updateMessageMetadata(
+  messageId: string,
+  metadata: ChatMessageMetadata | null,
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    "UPDATE chat_messages SET metadata_json = ? WHERE id = ?",
+    metadata ? JSON.stringify(metadata) : null,
+    messageId,
+  );
+}
+
 export async function deleteMessagesFrom(sessionId: string, messageId: string): Promise<void> {
   const db = await getDatabase();
   await db.withExclusiveTransactionAsync(async (txn) => {

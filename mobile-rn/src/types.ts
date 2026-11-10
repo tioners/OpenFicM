@@ -174,9 +174,11 @@ export interface AgentClarificationResponse {
 
 export interface ChatMessageMetadata {
   agentTrace?: AgentRunTrace;
-  taskStatus?: "completed" | "failed";
+  taskStatus?: "running" | "completed" | "failed";
   errorMessage?: string;
   errorDetail?: string;
+  /** 连续重试时，前几轮已经攒下的执行记录（避免第二次失败把第一次的进度也丢掉）。 */
+  priorExecutionRecord?: string;
   retryContext?: {
     userMessageId: string;
     modelId: string;

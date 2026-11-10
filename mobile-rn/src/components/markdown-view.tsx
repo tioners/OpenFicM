@@ -11,6 +11,7 @@ import {
 import { parseMarkdown, type MarkdownToken } from "@/markdown/markdown-parser";
 
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 
 /**
  * 把助手回复渲染成移动端友好的 Markdown。
@@ -374,7 +375,7 @@ export function MarkdownView({ content }: { content: string }) {
 /** 给外部一个仅测解析的入口，便于用 Node 跑断言。 */
 export { parseMarkdown } from "@/markdown/markdown-parser";
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   container: { gap: spacing.xs },
   paragraph: { color: colors.text, fontSize: 16, lineHeight: 24 },
   paragraphTight: { marginBottom: 0 },
@@ -416,4 +417,4 @@ const styles = StyleSheet.create({
   tableCell: { minWidth: 96, maxWidth: 220, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, justifyContent: "center" },
   tableText: { color: colors.text, fontSize: 14, lineHeight: 20 },
   tableHeaderText: { fontWeight: "700" },
-});
+}));

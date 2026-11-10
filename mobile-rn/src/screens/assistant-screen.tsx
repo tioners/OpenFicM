@@ -18,6 +18,7 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { AgentRunError, runAgent } from "@/agent/runtime";
+import { buildExecutionRecordMessage, summarizeExecutionRecord } from "@/agent/execution-record";
 import { AgentQuestionSheet, AgentTraceView } from "@/components/agent-run-view";
 import { MessageActionBar } from "@/components/message-action-bar";
 import { MarkdownView } from "@/components/markdown-view";
@@ -39,6 +40,8 @@ import {
   replaceUserMessageBranch,
   setSetting,
   updateChatSession,
+  updateMessageContent,
+  updateMessageMetadata,
 } from "@/data/repositories";
 import {
   getActiveStyleProfile,
@@ -49,6 +52,7 @@ import { getAgentDefinitions } from "@/settings/config";
 import { listStyleProfileOptions, type StyleProfileOption } from "@/style/profile-options";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
+import { themedStyles } from "@/themed-styles";
 import type {
   AgentClarificationRequest,
   AgentClarificationResponse,
@@ -106,6 +110,8 @@ type RetryRequest = {
   sessionId: string;
   userMessage: ChatMessage;
   history: ChatMessage[];
+  /** 上一轮已完成的写操作摘要；存在时作为一条 assistant 消息回放进历史。 */
+  executionRecord?: string | null;
   sourceMessageId: string;
   modelId: string;
   agentId: string | null;
@@ -148,9 +154,15 @@ function retryRequestForMessage(
     : messages.slice(0, messageIndex).map((item) => item.role).lastIndexOf("user");
   if (userIndex < 0 || userIndex >= messageIndex) return null;
   const userMessage = messages[userIndex];
+  // 断连时已执行的写操作只存在于 trace 里；回放进历史，模型才不会重做一遍。
+  // 连续重试时把前几轮攒下的记录一并带上，避免第二次失败只看到最近一轮。
+  const currentRecord = buildExecutionRecordMessage(message.metadata?.agentTrace);
+  const priorRecord = message.metadata?.priorExecutionRecord?.trim();
+  const executionRecord = [priorRecord, currentRecord].filter(Boolean).join("\n\n") || null;
   return {
     sessionId: session.id,
     userMessage,
+    executionRecord,
     history: messages.slice(0, userIndex + 1),
     sourceMessageId: message.id,
     modelId: context?.modelId ?? session.modelId ?? selection?.model.id ?? "",
@@ -206,6 +218,8 @@ export function AssistantScreen() {
   const loadRequestRef = useRef(0);
   const sendRequestRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // 执行前落下的占位消息：失败时改写成失败记录，而不是再插一条助手消息。
+  const progressMessageRef = useRef<ChatMessage | null>(null);
   const questionResolverRef = useRef<((response: AgentClarificationResponse) => void) | null>(null);
   // 滚动状态：loadedProjectRef 区分“首次进入作品”和“回到页面/任务完成的静默刷新”；
   // pinToBottomRef 是“内容布局完成后定位到底部”的一次性标记，由 onContentSizeChange 消费。
@@ -611,10 +625,52 @@ export function AssistantScreen() {
         setSessions((current) => [workingSession, ...current.filter((session) => session.id !== workingSession.id)]);
       }
       if (!userMessage) throw new Error("消息准备失败，请重试");
+      // 闭包里 TS 不再保留上面的非空收窄，这里固定成本次运行的快照。
+      const activeUserMessage = userMessage;
+      const activeSelection = runSelection;
+      const runRetryContext = {
+        userMessageId: activeUserMessage.id,
+        modelId: activeSelection.model.id,
+        agentId: retry?.agentId ?? activeAgentId,
+      };
+      // 执行中的进度先落一条占位 assistant 消息：断连或 App 被杀后，
+      // 这条记录仍能告诉用户"哪些写操作已经执行、哪些结果未知"。
+      const progressMessage = await addMessage(sessionId, "assistant", "正在执行…", {
+        taskStatus: "running",
+        retryContext: runRetryContext,
+      });
+      progressMessageRef.current = progressMessage;
+      let lastPersistedAt = 0;
+      const persistTrace = (trace: AgentRunTrace, force = false) => {
+        // 工具事件可能很密，节流写库；工具状态变化（开始/结束）强制落盘。
+        const now = Date.now();
+        const touchedToolState = trace.events.some((event) => event.status === "running" || event.status === "error")
+          || trace.status === "error";
+        if (!force && !touchedToolState && now - lastPersistedAt < 1_500) return;
+        lastPersistedAt = now;
+        void updateMessageMetadata(progressMessage.id, {
+          agentTrace: trace,
+          taskStatus: trace.status === "error" ? "failed" : "running",
+          retryContext: runRetryContext,
+        }).catch(() => undefined);
+      };
+      // 重试时把上一轮已完成的写操作作为一条 assistant 消息接在用户消息之后，
+      // 让模型知道"这些已经做过"，避免重复创建章节或重复改设定。
+      const agentHistory = retry?.executionRecord
+        ? [...nextHistory, {
+          id: `execution-record-${progressMessage.id}`,
+          projectId: progressMessage.projectId,
+          sessionId: progressMessage.sessionId,
+          role: "assistant" as const,
+          content: retry.executionRecord,
+          metadata: null,
+          createdAt: new Date().toISOString(),
+        }]
+        : nextHistory;
       const response = await runAgent({
         project,
         selection: runSelection,
-        history: nextHistory,
+        history: agentHistory,
         agentId: retry?.agentId ?? activeAgentId,
         approveTool: requestToolApproval,
         askUser,
@@ -622,14 +678,22 @@ export function AssistantScreen() {
         onTrace: (trace) => {
           latestTrace = trace;
           setLiveTrace(trace);
+          persistTrace(trace);
           if (atBottomRef.current) scrollToBottom(false);
         },
       });
-      const assistantMessage = await addMessage(sessionId, "assistant", response.content, {
+      // 任务正常结束：用最终结果覆盖占位消息，避免留下两条助手消息。
+      await updateMessageMetadata(progressMessage.id, {
         agentTrace: response.trace,
         taskStatus: "completed",
-        retryContext: { userMessageId: userMessage.id, modelId: runSelection.model.id, agentId: retry?.agentId ?? activeAgentId },
+        retryContext: runRetryContext,
       });
+      await updateMessageContent(progressMessage.id, response.content);
+      const assistantMessage = { ...progressMessage, content: response.content, metadata: {
+        agentTrace: response.trace,
+        taskStatus: "completed" as const,
+        retryContext: runRetryContext,
+      } };
       if (!isCurrentRequest()) return;
       setMessages((current) => {
         if (!retry) return [...current, assistantMessage];
@@ -647,20 +711,28 @@ export function AssistantScreen() {
       const retryModelId = runSelection?.model.id ?? retry?.modelId ?? activeSession.modelId ?? "";
       if (userMessageSaved && userMessage) {
         try {
-          const failedMessage = await addMessage(
-            sessionId,
-            "assistant",
-            "任务未完成：" + friendlyError.message,
-            {
-              agentTrace: failedTrace ?? undefined,
-              taskStatus: "failed",
-              errorMessage: friendlyError.message,
-              errorDetail: friendlyError.detail,
-              retryContext: { userMessageId: userMessage.id, modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId },
-            },
-          );
+          const failureMetadata = {
+            agentTrace: failedTrace ?? undefined,
+            taskStatus: "failed" as const,
+            errorMessage: friendlyError.message,
+            errorDetail: friendlyError.detail,
+            priorExecutionRecord: retry?.executionRecord ?? undefined,
+            retryContext: { userMessageId: userMessage.id, modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId },
+          };
+          const failureContent = "任务未完成：" + friendlyError.message;
+          // 优先复用执行前落下的占位消息，避免同一轮留下两条助手消息。
+          let failedMessage: ChatMessage;
+          if (progressMessageRef.current) {
+            await updateMessageContent(progressMessageRef.current.id, failureContent);
+            await updateMessageMetadata(progressMessageRef.current.id, failureMetadata);
+            failedMessage = { ...progressMessageRef.current, content: failureContent, metadata: failureMetadata };
+          } else {
+            failedMessage = await addMessage(sessionId, "assistant", failureContent, failureMetadata);
+          }
           if (isCurrentRequest()) {
-            setMessages((current) => [...current, failedMessage]);
+            setMessages((current) => current.some((item) => item.id === failedMessage.id)
+              ? current.map((item) => item.id === failedMessage.id ? failedMessage : item)
+              : [...current, failedMessage]);
             if (atBottomRef.current) scrollToBottom(false);
             setRetryRequest({ sessionId, userMessage, history: nextHistory, sourceMessageId: failedMessage.id, modelId: retryModelId, agentId: retry?.agentId ?? activeAgentId });
             refreshData();
@@ -793,6 +865,20 @@ export function AssistantScreen() {
                     ) : null}
                   </View>
                 ) : null}
+                {failed ? (() => {
+                  // 重试前先让用户知道会带回哪些步骤：已完成的不会重做，结果未知的会先核对。
+                  const record = summarizeExecutionRecord(item.metadata?.agentTrace);
+                  if (!record.completed.length && !record.unfinished.length) return null;
+                  return (
+                    <Text style={styles.executionRecordHint}>
+                      {`已保留 ${record.completed.length} 个已完成步骤，重试时会带给助手，不会重复执行`}
+                      {record.unfinished.length
+                        ? `；另有 ${record.unfinished.length} 个步骤未完成${record.hasUnknownOutcome ? "（可能已写入，重试会先核对）" : ""}`
+                        : ""}
+                      。
+                    </Text>
+                  );
+                })() : null}
                 {item.role === "assistant" ? (
                   // 助手回复按 Markdown 渲染；用户消息保持纯文本，避免把 "1. " 这类输入擅自变成列表。
                   item.content.trim()
@@ -855,7 +941,7 @@ export function AssistantScreen() {
                 (pressed || (!sending && (!selection || !input.trim()))) && styles.sendDisabled,
               ]}
             >
-              {sending ? <Ionicons name="stop" size={20} color="#FFFFFF" /> : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
+              {sending ? <Ionicons name="stop" size={20} color={colors.onPrimary} /> : <Ionicons name="arrow-up" size={22} color={colors.onPrimary} />}
             </Pressable>
           </View>
         </View>
@@ -963,7 +1049,7 @@ export function AssistantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((colors) => StyleSheet.create({
   flex: { flex: 1 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   headerActions: { flexDirection: "row", alignItems: "center" },
@@ -1032,7 +1118,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     elevation: 4,
-    shadowColor: "#000000",
+    shadowColor: colors.shadow,
     shadowOpacity: 0.18,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -1045,8 +1131,9 @@ const styles = StyleSheet.create({
   assistantMessage: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   messageRole: { color: colors.primary, fontSize: 12, fontWeight: "700" },
   messageText: { color: colors.text, fontSize: 16, lineHeight: 24 },
-  failureCard: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: "#E4B4AE", borderRadius: radius.md, backgroundColor: "#FFF4F2" },
+  failureCard: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.dangerBorder, borderRadius: radius.md, backgroundColor: colors.dangerSoft },
   failureTitle: { color: colors.danger, fontSize: 13, fontWeight: "700" },
+  executionRecordHint: { marginTop: spacing.xs, color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   failureRetry: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.danger, borderRadius: radius.sm },
   failureRetryDisabled: { opacity: 0.5 },
   failureRetryText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
@@ -1098,4 +1185,4 @@ const styles = StyleSheet.create({
   sheetRowText: { flex: 1, minWidth: 0 },
   sheetRowTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
   sheetRowMeta: { marginTop: 3, color: colors.textMuted, fontSize: 12 },
-});
+}));
