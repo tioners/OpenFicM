@@ -340,6 +340,28 @@ function toGeminiProperties(value: unknown): Record<string, unknown> | undefined
   return output;
 }
 
+/**
+ * 请求前的最后一道保险：Gemini 只接受"properties 的每个值都是对象"。
+ * 不论 schema 来自内置工具、插件还是以后接入的远程工具，只要出现字符串等
+ * 非对象值，就地改写成 { type }，避免整次请求 400。
+ */
+function sanitizeGeminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(sanitizeGeminiSchema);
+  if (!isRecord(schema)) return schema;
+  const output: Record<string, unknown> = { ...schema };
+  if (isRecord(schema.properties)) {
+    const properties: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(schema.properties)) {
+      if (typeof value === "string") properties[name] = { type: value.toUpperCase() };
+      else if (isRecord(value)) properties[name] = sanitizeGeminiSchema(value);
+      else properties[name] = { type: "STRING" };
+    }
+    output.properties = properties;
+  }
+  if (isRecord(schema.items)) output.items = sanitizeGeminiSchema(schema.items);
+  return output;
+}
+
 function toGeminiSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(toGeminiSchema);
   // 注意：这里**不能**把任意字符串都包装成 { type }，否则 description 这类
@@ -424,7 +446,7 @@ async function callGemini(
       contents: geminiContents(messages),
       ...(tools.length ? {
         tools: [{ functionDeclarations: tools.map((tool) => {
-          const parameters = toGeminiSchema(tool.parameters);
+          const parameters = sanitizeGeminiSchema(toGeminiSchema(tool.parameters));
           // 无参数工具不要发空 parameters：Gemini 对没有 properties 的 OBJECT 兼容性不一致。
           const hasParameters = isRecord(parameters)
             && isRecord((parameters as Record<string, unknown>).properties)

@@ -129,6 +129,13 @@ function humanizeAgentError(error: unknown): { message: string; detail: string }
   if (/fetch failed|network request failed|unable to connect|cannot connect/.test(normalized)) {
     return { message: "网络连接异常，请检查网络、Base URL 和证书设置后重试", detail };
   }
+  // Gemini 的工具定义格式校验失败有固定措辞，单独提示，避免被笼统的"400"盖过。
+  if (/function_declarations|invalid value at '?tools/.test(normalized)) {
+    return {
+      message: "Gemini 拒绝了工具定义格式（400）。0.13.0 起已修复该问题，请在“设置 → 高级”确认当前版本号；仍报错时展开原始详情反馈",
+      detail,
+    };
+  }
   if (/\bhttp\s*400\b|\b400\s*:/.test(normalized)) {
     return { message: "供应商拒绝了本次请求（400），请检查模型工具调用兼容性后重试", detail };
   }
