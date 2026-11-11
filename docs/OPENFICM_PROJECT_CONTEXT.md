@@ -10,12 +10,12 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.13.0
+当前正式版本：0.13.1
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.13.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.13.1
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +24,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.13.0 发布提交，以 v0.13.0 标签为准
+- 最新源码提交：本次 0.13.1 发布提交，以 v0.13.1 标签为准
 - 本轮审查基线：7aac016 feat(mobile): 助手回复支持 Markdown 渲染
-- Release 标签：v0.13.0
+- Release 标签：v0.13.1
 - Android applicationId：com.openfic.mobile
-- versionCode：25
-- versionName：0.13.0
+- versionCode：26
+- versionName：0.13.1
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.13.0.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.13.1.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.13.0 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版三件事：① 新增夜间模式（跟随系统/浅色/深色），做法是 `theme.ts` 的调色板代理 + `themed-styles.ts` 按明暗缓存样式表，14 个文件的样式块只包一层，487 处 `colors.x` 无需逐个改；② 断连后的执行记录：执行前落占位消息、失败时改写、重试时把已完成的写操作摘要注入历史，避免重复写章节，详见 docs/releases/v0.13.0.md；③ 修复 Gemini 官方接口一律 400——`toGeminiSchema` 把 `properties` 映射本身当成 schema，给每个工具塞了个值为字符串的伪参数 `type`。0.12.1 去掉关键词预判（助手不再一问就动手，见 v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
+0.13.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 
