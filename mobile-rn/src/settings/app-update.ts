@@ -24,21 +24,43 @@ export interface AppUpdateInfo {
   checkedAt: string;
 }
 
-function versionSegments(value: string): number[] {
-  return value.trim().replace(/^v/i, "").split(/[.\-+]/)
+function numericSegments(value: string): number[] {
+  return value.split(/[.\-+]/)
     .map((part) => Number.parseInt(part, 10))
     .filter((part) => Number.isInteger(part));
 }
 
-/** 按段做数值比较，避免 "0.10.0" 被字典序判成小于 "0.7.5"。 */
-export function compareVersions(left: string, right: string): number {
-  const a = versionSegments(left);
-  const b = versionSegments(right);
+function compareSegments(a: number[], b: number[]): number {
   for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
     const difference = (a[index] ?? 0) - (b[index] ?? 0);
     if (difference !== 0) return difference > 0 ? 1 : -1;
   }
   return 0;
+}
+
+/** 拆成"主版本号"和"预发布后缀"：0.14.0-beta.1 → 0.14.0 与 beta.1。 */
+function splitVersion(value: string): { core: number[]; prerelease: string | null } {
+  const normalized = value.trim().replace(/^v/i, "").split("+")[0];
+  const dash = normalized.indexOf("-");
+  return dash < 0
+    ? { core: numericSegments(normalized), prerelease: null }
+    : { core: numericSegments(normalized.slice(0, dash)), prerelease: normalized.slice(dash + 1) };
+}
+
+/**
+ * 按段做数值比较，避免 "0.10.0" 被字典序判成小于 "0.7.5"。
+ * 主版本号相同时，预发布版本（-beta.N）低于正式版，否则装了测试版的手机永远收不到正式版提示。
+ */
+export function compareVersions(left: string, right: string): number {
+  const a = splitVersion(left);
+  const b = splitVersion(right);
+  const core = compareSegments(a.core, b.core);
+  if (core !== 0) return core;
+  if (a.prerelease === null || b.prerelease === null) {
+    if (a.prerelease === b.prerelease) return 0;
+    return a.prerelease === null ? 1 : -1;
+  }
+  return compareSegments(numericSegments(a.prerelease), numericSegments(b.prerelease));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

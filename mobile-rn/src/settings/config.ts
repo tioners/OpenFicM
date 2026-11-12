@@ -65,6 +65,7 @@ export const DEFAULT_INDEX_SETTINGS: IndexSettings = {
 };
 
 export const TOOL_CATALOG = [
+  { key: "list_volumes", name: "列出卷", readonly: true },
   { key: "list_chapters", name: "列出章节", readonly: true },
   { key: "read_chapter", name: "读取章节", readonly: true },
   { key: "search_chapters", name: "全文搜索章节", readonly: true },
@@ -91,6 +92,11 @@ export const TOOL_CATALOG = [
   { key: "save_reference_style_profile", name: "保存参考文风", readonly: false },
   { key: "write_chapter", name: "创建章节", readonly: false },
   { key: "edit_chapter", name: "修改章节", readonly: false },
+  { key: "delete_chapter", name: "删除章节", readonly: false },
+  { key: "create_volume", name: "创建卷", readonly: false },
+  { key: "edit_volume", name: "重命名卷", readonly: false },
+  { key: "delete_volume", name: "删除卷", readonly: false },
+  { key: "move_chapter_to_volume", name: "移动章节到其它卷", readonly: false },
   { key: "create_character", name: "创建角色", readonly: false },
   { key: "edit_character", name: "修改角色", readonly: false },
   { key: "delete_character", name: "删除角色", readonly: false },

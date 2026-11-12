@@ -145,14 +145,16 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const [agentModelId, setAgentModelId] = useState("");
   const [historyLimit, setHistoryLimit] = useState("30");
   const [compression, setCompression] = useState(false);
+  const [pruneToolOutputs, setPruneToolOutputs] = useState(true);
   const [autoSaveDelay, setAutoSaveDelay] = useState("1000");
   const [editorFontSize, setEditorFontSize] = useState("17");
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
   const [requestTimeout, setRequestTimeout] = useState("120000");
   const [maxAttempts, setMaxAttempts] = useState("3");
   const [maxServerErrorAttempts, setMaxServerErrorAttempts] = useState("2");
-  const [maxRateLimitAttempts, setMaxRateLimitAttempts] = useState("1");
+  const [maxRateLimitAttempts, setMaxRateLimitAttempts] = useState("3");
   const [retryOnTimeout, setRetryOnTimeout] = useState(false);
+  const [streamResponses, setStreamResponses] = useState(true);
   const [ohStoryState, setOhStoryState] = useState<OhStoryUpdateState>(EMPTY_OH_STORY_STATE);
   const [ohStoryProgress, setOhStoryProgress] = useState("");
   const [ohStoryBusy, setOhStoryBusy] = useState(false);
@@ -192,7 +194,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
     setLoading(true);
     setError(null);
     try {
-      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, autoSave, fontSize, timeout, attempts, serverAttempts, rateLimitAttempts, retryOnTimeoutValue, nextModels, nextOhStoryState, nextResourceState] = await Promise.all([
+      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, prune, autoSave, fontSize, timeout, attempts, serverAttempts, rateLimitAttempts, retryOnTimeoutValue, streamValue, nextModels, nextOhStoryState, nextResourceState] = await Promise.all([
         getIndexSettings(),
         getAgentRules(),
         getAgentSkills(),
@@ -201,6 +203,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
         getSetting("agent.activeDefinitionId"),
         getSetting("context.historyLimit"),
         getSetting("context.compressSystemPrompts"),
+        getSetting("context.pruneToolOutputs"),
         getSetting("general.autoSaveDelay"),
         getSetting("general.editorFontSize"),
         getSetting("connections.requestTimeout"),
@@ -208,6 +211,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
         getSetting("connections.maxServerErrorAttempts"),
         getSetting("connections.maxRateLimitAttempts"),
         getSetting("connections.retryOnTimeout"),
+        getSetting("connections.streamResponses"),
         listModels(),
         getOhStoryUpdateState(),
         getRuntimeResourceState(),
@@ -226,13 +230,15 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       if (nextActiveAgentId !== (active ?? "")) await setSetting("agent.activeDefinitionId", nextActiveAgentId);
       setHistoryLimit(history ?? "30");
       setCompression(compress === "true");
+      setPruneToolOutputs(prune !== "false");
       setAutoSaveDelay(autoSave ?? "1000");
       setEditorFontSize(fontSize ?? "17");
       setRequestTimeout(timeout ?? "120000");
       setMaxAttempts(attempts ?? "3");
       setMaxServerErrorAttempts(serverAttempts ?? "2");
-      setMaxRateLimitAttempts(rateLimitAttempts ?? "1");
+      setMaxRateLimitAttempts(rateLimitAttempts ?? "3");
       setRetryOnTimeout(retryOnTimeoutValue === "true");
+      setStreamResponses(streamValue !== "false");
       setAvailableModels(nextModels);
       setOhStoryState(nextOhStoryState);
       setResourceState(nextResourceState);
@@ -568,12 +574,17 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
           <Field label="模型请求超时（毫秒）" value={requestTimeout} onChangeText={setRequestTimeout} onBlur={() => void savePreference("connections.requestTimeout", requestTimeout)} keyboardType="number-pad" />
           <Field label="网络错误最多尝试次数（1-5）" value={maxAttempts} onChangeText={setMaxAttempts} onBlur={() => void savePreference("connections.maxAttempts", maxAttempts)} keyboardType="number-pad" />
           <Field label="服务器错误最多尝试次数（1-3）" value={maxServerErrorAttempts} onChangeText={setMaxServerErrorAttempts} onBlur={() => void savePreference("connections.maxServerErrorAttempts", maxServerErrorAttempts)} keyboardType="number-pad" />
-          <Field label="限流（429）最多尝试次数（1-3）" value={maxRateLimitAttempts} onChangeText={setMaxRateLimitAttempts} onBlur={() => void savePreference("connections.maxRateLimitAttempts", maxRateLimitAttempts)} keyboardType="number-pad" />
-          <Text style={styles.fieldHint}>尝试次数包含第一次请求；限流默认不重试，避免放大中转站的限流。</Text>
+          <Field label="限流（429）最多尝试次数（1-5）" value={maxRateLimitAttempts} onChangeText={setMaxRateLimitAttempts} onBlur={() => void savePreference("connections.maxRateLimitAttempts", maxRateLimitAttempts)} keyboardType="number-pad" />
+          <Text style={styles.fieldHint}>尝试次数包含第一次请求。限流时会按供应商给出的等待时间（没有则 5 到 30 秒）暂停后再发，额度或余额不足不会重试；填 1 表示一遇到限流就停止。</Text>
           <ToggleRow label="超时后自动重发（可能重复计费）" value={retryOnTimeout} onChange={(value) => {
             setRetryOnTimeout(value);
             void savePreference("connections.retryOnTimeout", String(value));
           }} />
+          <ToggleRow label="流式接收回复" value={streamResponses} onChange={(value) => {
+            setStreamResponses(value);
+            void savePreference("connections.streamResponses", String(value));
+          }} />
+          <Text style={styles.fieldHint}>开启后上面的超时按“多久没收到新数据”计算，长章节只要还在生成就不会被中断。个别中转站不支持流式或流式下工具调用异常时关闭；改动约半分钟内生效。</Text>
           <SettingRow label="供应商和模型" value="在“模型”分类中管理" />
           <SettingRow label="网络边界" value="只有调用用户配置的模型 API 时联网；作品数据保存在本机" />
         </View>
@@ -598,6 +609,11 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
             setCompression(value);
             void savePreference("context.compressSystemPrompts", String(value));
           }} />
+          <ToggleRow label="自动清理较早的工具结果" value={pruneToolOutputs} onChange={(value) => {
+            setPruneToolOutputs(value);
+            void savePreference("context.pruneToolOutputs", String(value));
+          }} />
+          <Text style={styles.fieldHint}>一次任务里读过的章节、角色等内容每轮都会重发。开启后，累计超过约 4 万字符时，较早的读取结果会换成占位说明（最近 4 条保留），写入结果、技能指令和子智能体结论不受影响；助手需要时会重新读取。能明显降低单次请求体量，减少被中转站限流。</Text>
         </View>
       ) : null}
       {category === "style" ? (

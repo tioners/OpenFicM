@@ -3,7 +3,10 @@ import {
 } from "@/data/chapter-draft-repositories";
 import {
   createChapter,
+  createVolume,
+  deleteChapter,
   deleteCharacter,
+  deleteVolume,
   deleteWorldInfoEntry,
   getCharacter,
   getChapter,
@@ -13,6 +16,8 @@ import {
   listCharacters,
   listVolumes,
   listWorldInfoEntries,
+  moveChapterToVolume,
+  renameVolume,
   saveCharacter,
   saveChapter,
   saveWorldInfoEntry,
@@ -28,6 +33,7 @@ import {
   setActiveStyleProfile,
 } from "@/data/style-repositories";
 import type { AgentToolDefinition } from "@/llm/types";
+import type { Volume } from "@/types";
 import {
   createNote,
   deleteNote,
@@ -38,6 +44,7 @@ import {
   updateNote,
 } from "@/data/note-repositories";
 import { searchProjectKnowledge } from "@/search/indexer";
+import { replaceText } from "@/lib/text-match";
 import { getAuthorStyleGuide, saveAuthorStyleGuide } from "@/settings/lorn-style-plugin";
 import { readStyleSourceSample } from "@/style/source-library";
 
@@ -423,15 +430,79 @@ export const agentTools: AgentToolDefinition[] = [
   },
   {
     name: "edit_chapter",
-    description: "修改已有章节标题或正文",
+    description: "修改已有章节的标题或正文。改动局部内容时用 old_content + new_content 做局部替换，不要把整章重新输出一遍；old_content 取自 read_chapter 返回的原文，长度要足以唯一定位。只有整章重写时才用 content 传完整正文",
     parameters: {
       type: "object",
       properties: {
-        chapter_id: { type: "string" },
-        title: { type: "string" },
-        content: { type: "string" },
+        chapter_id: { type: "string", description: "章节 ID" },
+        title: { type: "string", description: "新标题；不改标题时省略" },
+        old_content: { type: "string", description: "要被替换的原文片段，须与章节现有内容一致" },
+        new_content: { type: "string", description: "替换后的文本；传空字符串表示删除该片段" },
+        replace_all: { type: "boolean", description: "是否替换全部匹配；省略时只替换第一处" },
+        content: { type: "string", description: "完整的新正文，仅在整章重写时使用，不能与 old_content/new_content 同时提供" },
       },
       required: ["chapter_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_volumes",
+    description: "列出当前作品的卷及每卷章节数；新建章节或移动章节前用它确认卷 ID",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: "create_volume",
+    description: "在当前作品中新建一卷，新卷排在最后；仅在用户明确要求分卷时调用",
+    parameters: {
+      type: "object",
+      properties: { title: { type: "string", description: "卷名" } },
+      required: ["title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "edit_volume",
+    description: "重命名已有卷，不改变卷内章节",
+    parameters: {
+      type: "object",
+      properties: {
+        volume_id: { type: "string", description: "卷 ID" },
+        title: { type: "string", description: "新的卷名" },
+      },
+      required: ["volume_id", "title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "delete_volume",
+    description: "删除整卷及其中的全部章节，只在用户明确要求时调用；卷内笔记会上浮到整书级，不会被删除",
+    parameters: {
+      type: "object",
+      properties: { volume_id: { type: "string", description: "卷 ID" } },
+      required: ["volume_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "delete_chapter",
+    description: "删除章节，只在用户明确要求时调用；该章的笔记会上浮到所属卷，不会被删除",
+    parameters: {
+      type: "object",
+      properties: { chapter_id: { type: "string", description: "章节 ID" } },
+      required: ["chapter_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "move_chapter_to_volume",
+    description: "把已有章节移到另一卷的末尾，正文和笔记都不变",
+    parameters: {
+      type: "object",
+      properties: {
+        chapter_id: { type: "string", description: "章节 ID" },
+        volume_id: { type: "string", description: "目标卷 ID" },
+      },
+      required: ["chapter_id", "volume_id"],
       additionalProperties: false,
     },
   },
@@ -447,6 +518,13 @@ function requiredString(args: Record<string, unknown>, key: string): string {
 function optionalString(args: Record<string, unknown>, key: string): string | null {
   const value = args[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** 卷必须属于当前作品：卷 ID 由模型给出，跨作品访问要直接拒绝。 */
+async function requireVolume(projectId: string, volumeId: string): Promise<Volume> {
+  const volume = (await listVolumes(projectId)).find((item) => item.id === volumeId);
+  if (!volume) throw new Error("未找到卷");
+  return volume;
 }
 
 export async function executeAgentTool(
@@ -783,14 +861,41 @@ export async function executeAgentTool(
     const chapter = await getChapter(requiredString(args, "chapter_id"));
     if (!chapter || chapter.projectId !== projectId) throw new Error("未找到章节");
     const hasContent = typeof args.content === "string";
-    if (hasContent && !(args.content as string).trim()) {
+    const hasOldContent = typeof args.old_content === "string";
+    const hasNewContent = typeof args.new_content === "string";
+    if (hasContent && (hasOldContent || hasNewContent)) {
+      throw new Error("content 与 old_content/new_content 只能二选一：局部修改用后者，整章重写用前者");
+    }
+    if (hasOldContent !== hasNewContent) throw new Error("局部替换需要同时提供 old_content 和 new_content");
+    if (!hasContent && !hasOldContent && typeof args.title !== "string") {
+      throw new Error("至少提供 title、old_content/new_content 或 content 之一");
+    }
+    let content = chapter.content;
+    let replacements: number | undefined;
+    if (hasContent) {
+      content = args.content as string;
+    } else if (hasOldContent) {
+      if (!(args.old_content as string).trim()) throw new Error("old_content 不能为空");
+      const replaced = replaceText(
+        chapter.content,
+        args.old_content as string,
+        args.new_content as string,
+        args.replace_all === true,
+      );
+      if (!replaced) {
+        throw new Error("没有在章节中找到 old_content。请先用 read_chapter 读取当前正文，原样复制要修改的片段后再试");
+      }
+      content = replaced.content;
+      replacements = replaced.replacements;
+    }
+    if ((hasContent || hasOldContent) && !content.trim()) {
       throw new Error("章节正文不能为空；如需删除整章请先与用户确认");
     }
     const title = typeof args.title === "string" ? args.title : chapter.title;
-    const content = hasContent ? args.content as string : chapter.content;
+    const contentChanged = content !== chapter.content;
     const style = await getActiveStyleProfile(projectId);
     // 覆盖正文前先把旧内容存一份快照，模型误清空或写坏时能在草稿里找回上一版。
-    if (hasContent && content !== chapter.content && chapter.content.trim()) {
+    if (contentChanged && chapter.content.trim()) {
       await createChapterDraftSnapshot({
         projectId,
         chapterId: chapter.id,
@@ -799,7 +904,7 @@ export async function executeAgentTool(
       });
     }
     await saveChapter(chapter.id, title, content);
-    if (hasContent && content.trim() && content !== chapter.content) {
+    if (contentChanged) {
       await createChapterDraftSnapshot({
         projectId,
         chapterId: chapter.id,
@@ -811,8 +916,54 @@ export async function executeAgentTool(
       success: true,
       chapter_id: chapter.id,
       title,
+      ...(replacements === undefined ? {} : { replacements }),
       style_profile_id: style?.id ?? null,
       style_profile_name: style?.name ?? "不使用文风",
+    };
+  }
+  if (name === "list_volumes") {
+    const [volumes, chapters] = await Promise.all([listVolumes(projectId), listChapters(projectId)]);
+    return {
+      volumes: volumes.map((volume) => ({
+        id: volume.id,
+        title: volume.title,
+        order_index: volume.orderIndex,
+        chapter_count: chapters.filter((chapter) => chapter.volumeId === volume.id).length,
+      })),
+    };
+  }
+  if (name === "create_volume") {
+    const volume = await createVolume(projectId, requiredString(args, "title"));
+    return { success: true, volume_id: volume.id, title: volume.title };
+  }
+  if (name === "edit_volume") {
+    const volume = await requireVolume(projectId, requiredString(args, "volume_id"));
+    const renamed = await renameVolume(volume.id, requiredString(args, "title"));
+    return { success: true, volume_id: renamed.id, title: renamed.title };
+  }
+  if (name === "delete_volume") {
+    const volume = await requireVolume(projectId, requiredString(args, "volume_id"));
+    const deletedChapters = (await listChapters(projectId)).filter((chapter) => chapter.volumeId === volume.id).length;
+    await deleteVolume(volume.id);
+    return { success: true, volume_id: volume.id, title: volume.title, deleted_chapters: deletedChapters };
+  }
+  if (name === "delete_chapter") {
+    const chapter = await getChapter(requiredString(args, "chapter_id"));
+    if (!chapter || chapter.projectId !== projectId) throw new Error("未找到章节");
+    await deleteChapter(chapter.id);
+    return { success: true, chapter_id: chapter.id, title: chapter.title };
+  }
+  if (name === "move_chapter_to_volume") {
+    const chapter = await getChapter(requiredString(args, "chapter_id"));
+    if (!chapter || chapter.projectId !== projectId) throw new Error("未找到章节");
+    const volume = await requireVolume(projectId, requiredString(args, "volume_id"));
+    const moved = await moveChapterToVolume(chapter.id, volume.id);
+    return {
+      success: true,
+      chapter_id: moved.id,
+      title: moved.title,
+      volume_id: volume.id,
+      volume_title: volume.title,
     };
   }
   throw new Error(`未知工具: ${name}`);

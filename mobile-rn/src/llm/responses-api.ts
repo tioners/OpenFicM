@@ -31,7 +31,9 @@ function parseArguments(value: unknown): Record<string, unknown> {
   if (isRecord(value)) return value;
   if (typeof value !== "string" || !value.trim()) return {};
   try {
-    const parsed: unknown = JSON.parse(value);
+    let parsed: unknown = JSON.parse(value);
+    // 部分模型会把参数对象再包一层 JSON 字符串。
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return isRecord(parsed) ? parsed : {};
   } catch {
     return {};

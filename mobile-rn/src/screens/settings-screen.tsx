@@ -492,7 +492,7 @@ export function SettingsScreen() {
         <Field label="模型 ID" value={modelId} onChangeText={setModelId} autoCapitalize="none" placeholder="gemini-2.5-pro" />
         <Field label="温度" value={temperature} onChangeText={setTemperature} keyboardType="decimal-pad" />
         <Field label="最大输出 Token 数" value={maxTokens} onChangeText={setMaxTokens} keyboardType="number-pad" />
-        <Text style={styles.fieldHint}>单次回复长度，不是上下文窗口；1M 上下文模型保持 {DEFAULT_MAX_OUTPUT_TOKENS} 或按需填写，最高 {MAX_CONFIGURED_OUTPUT_TOKENS}。</Text>
+        <Text style={styles.fieldHint}>单次回复长度，不是上下文窗口。写整章正文或使用思考型模型时建议 {DEFAULT_MAX_OUTPUT_TOKENS} 以上，太小会让工具调用被截断；供应商报“超出模型上限”时调回该模型支持的数值，最高 {MAX_CONFIGURED_OUTPUT_TOKENS}。</Text>
         <Button label="添加模型" onPress={() => void addModel()} disabled={!selectedProviderId || !modelName.trim() || !modelId.trim()} loading={savingModel} />
       </View>
 

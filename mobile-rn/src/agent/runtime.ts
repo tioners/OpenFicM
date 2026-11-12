@@ -40,6 +40,8 @@ import type {
 import { listNotes, noteScope } from "@/data/note-repositories";
 
 import { agentTools, executeAgentTool } from "./tools";
+import { pruneToolOutputs } from "./context-pruning";
+import { toolsForAgent as selectToolsForAgent } from "./tool-selection";
 
 const MAX_AGENT_ITERATIONS = 12;
 const MAX_DELEGATION_DEPTH = 1;
@@ -73,6 +75,7 @@ type RuntimeCatalog = {
   permissions: Record<string, ToolPermissionMode>;
   historyLimit: number;
   compressSystemPrompts: boolean;
+  pruneToolOutputs: boolean;
   styleSelectionConfigured: boolean;
   activeStyleProfile: StyleProfile | null;
   availableStyleProfiles: StyleProfile[];
@@ -243,6 +246,7 @@ function toolDisplayName(name: string): string {
 
 function toolResultDetail(name: string, result: Record<string, unknown>): string {
   const count = (key: string) => Array.isArray(result[key]) ? result[key].length : 0;
+  if (name === "list_volumes") return `已读取 ${count("volumes")} 卷`;
   if (name === "list_chapters") return `已读取 ${count("chapters")} 个章节`;
   if (name === "list_characters") return `已读取 ${count("characters")} 个角色`;
   if (name === "list_world_entries") return `已读取 ${count("entries")} 个世界书条目`;
@@ -336,20 +340,10 @@ function enabledDelegates(catalog: RuntimeCatalog, agent: AgentDefinition): Agen
   return catalog.agents.filter((candidate) => candidate.enabled && candidate.kind === "subagent" && allowedIds.has(candidate.id));
 }
 
+// 内容包里的 toolNames 白名单固定在某次提交上，新增工具若必须等目录更新才能用，
+// 就得重新发布内容包。工具分配规则见 tool-selection.ts（纯函数，可脱离手机验证）。
 function toolsForAgent(agent: AgentDefinition): AgentToolDefinition[] {
-  const allowed = new Set(agent.toolNames.length ? agent.toolNames : agentTools.map((tool) => tool.name));
-  allowed.add("ask_user");
-  allowed.add("read_author_style_guide");
-  allowed.add("save_author_style_guide");
-  allowed.add("evolve_author_style");
-  allowed.add("list_style_sources");
-  allowed.add("read_style_source_sample");
-  allowed.add("list_style_profiles");
-  allowed.add("read_style_profile");
-  allowed.add("select_style_profile");
-  allowed.add("save_reference_style_profile");
-  if (agent.kind !== "primary") allowed.delete("delegate_agent");
-  return agentTools.filter((tool) => allowed.has(tool.name));
+  return selectToolsForAgent(agent, agentTools);
 }
 
 function systemPrompt(input: {
@@ -575,8 +569,19 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
       throw new Error("本次任务的模型请求次数已达上限，请拆分需求后重试");
     }
     input.budget.remaining -= 1;
-    const turn = await callModel(input.selection, messages, tools, { signal: input.signal });
-    messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
+    // 只裁剪"要发出去的那一份"：messages 本身保留完整结果，工具配对与 trace 不受影响。
+    const turn = await callModel(
+      input.selection,
+      input.catalog.pruneToolOutputs ? pruneToolOutputs(messages) : messages,
+      tools,
+      { signal: input.signal },
+    );
+    messages.push({
+      role: "assistant",
+      content: turn.content,
+      toolCalls: turn.toolCalls,
+      ...(turn.reasoningContent !== undefined ? { reasoningContent: turn.reasoningContent } : {}),
+    });
 
     if (turn.toolCalls.length === 0) {
       if (consistencyRequired && consistencyEventId) {
@@ -765,7 +770,7 @@ export async function runAgent(input: {
 }): Promise<AgentRunResult> {
   throwIfAborted(input.signal);
   const consistencyKey = `agent.pendingConsistency.${input.project.id}`;
-  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pendingConsistency, styleSelection, availableStyleProfiles, notes] = await Promise.all([
+  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pruneValue, pendingConsistency, styleSelection, availableStyleProfiles, notes] = await Promise.all([
     getAgentRules(),
     getAgentSkills(),
     getAgentDefinitions(),
@@ -773,6 +778,7 @@ export async function runAgent(input: {
     getSetting("agent.activeDefinitionId"),
     getSetting("context.historyLimit"),
     getSetting("context.compressSystemPrompts"),
+    getSetting("context.pruneToolOutputs"),
     getSetting(consistencyKey),
     getActiveStyleSelection(input.project.id),
     listStyleProfiles(input.project.id),
@@ -788,6 +794,8 @@ export async function runAgent(input: {
       ? parsedHistoryLimit
       : 30,
     compressSystemPrompts: compressValue === "true",
+    // 默认开启：未设置过（null）时也按开启处理。
+    pruneToolOutputs: pruneValue !== "false",
     styleSelectionConfigured: styleSelection.configured,
     activeStyleProfile: styleSelection.profile,
     availableStyleProfiles,

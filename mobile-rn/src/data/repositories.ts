@@ -456,6 +456,46 @@ export async function deleteChapter(id: string): Promise<void> {
   });
 }
 
+/**
+ * 把章节移到另一卷的末尾。
+ * 章级笔记的归属卷跟着章节走，否则移动后笔记会留在旧卷下、显示成不属于该章的卷级笔记。
+ */
+export async function moveChapterToVolume(chapterId: string, volumeId: string): Promise<Chapter> {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  const moved: { row: ChapterRow | null } = { row: null };
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const chapter = await txn.getFirstAsync<ChapterRow>("SELECT * FROM chapters WHERE id = ?", chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    const volume = await txn.getFirstAsync<{ id: string }>(
+      "SELECT id FROM volumes WHERE id = ? AND project_id = ?",
+      volumeId,
+      chapter.project_id,
+    );
+    if (!volume) throw new Error("卷不属于当前作品");
+    if (chapter.volume_id === volumeId) {
+      moved.row = chapter;
+      return;
+    }
+    const orderRow = await txn.getFirstAsync<{ next_order: number }>(
+      "SELECT COALESCE(MAX(order_index), 0) + 1 AS next_order FROM chapters WHERE volume_id = ?",
+      volumeId,
+    );
+    const orderIndex = orderRow?.next_order ?? 1;
+    await txn.runAsync(
+      "UPDATE chapters SET volume_id = ?, order_index = ? WHERE id = ?",
+      volumeId,
+      orderIndex,
+      chapterId,
+    );
+    await txn.runAsync("UPDATE notes SET volume_id = ? WHERE chapter_id = ?", volumeId, chapterId);
+    await txn.runAsync("UPDATE projects SET updated_at = ? WHERE id = ?", now, chapter.project_id);
+    moved.row = { ...chapter, volume_id: volumeId, order_index: orderIndex };
+  });
+  if (!moved.row) throw new Error("章节不存在");
+  return mapChapter(moved.row);
+}
+
 export async function searchChapters(projectId: string, query: string): Promise<Chapter[]> {
   const db = await getDatabase();
   const trimmedQuery = query.trim();
