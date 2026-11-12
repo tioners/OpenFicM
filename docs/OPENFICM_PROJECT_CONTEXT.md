@@ -1,6 +1,6 @@
 # OpenFicM 项目交接记录
 
-最后更新：2026-10-06
+最后更新：2026-11-12
 
 这份文档用于让新的开发窗口快速恢复项目上下文。继续工作前先阅读本文件、根目录 AGENTS.md、README.md 和 mobile-rn/DESIGN.md。
 
@@ -10,12 +10,14 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.13.1
+当前正式版本：0.14.0
+
+上游对齐基线：保留的 `backend`/`frontend`/`desktop` 停在上游 v0.10.0（2026-08-16）。上游此后已到 v0.13.0，对比上游现状时要用 `gh api repos/syrizelink/OpenFic/...` 读最新代码，不要以本地这三个目录为准。
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.13.1
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.14.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -24,18 +26,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.13.1 发布提交，以 v0.13.1 标签为准
-- 本轮审查基线：7aac016 feat(mobile): 助手回复支持 Markdown 渲染
-- Release 标签：v0.13.1
+- 最新源码提交：本次 0.14.0 发布提交，以 v0.14.0 标签为准
+- 本轮审查基线：3650830 docs: 记录 0.13.1 的 Gemini 兜底加固与验证方式
+- Release 标签：v0.14.0
 - Android applicationId：com.openfic.mobile
-- versionCode：26
-- versionName：0.13.1
+- versionCode：27
+- versionName：0.14.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.13.1.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.14.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.13.1 继续使用 0.7.0 的正式证书，因此可以直接覆盖升级。本版是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
+0.14.0 继续使用 0.7.0 的正式证书，可以直接覆盖升级；内容是限流治理、`reasoning_content` 400 修复和与上游的一轮对齐，见 docs/releases/v0.14.0.md 与下文"0.14.0 发布记录"。0.13.1 是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 
@@ -111,8 +113,12 @@ GitHub 仓库：
 - src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考文风与作者文风版本和作品级选择。
 - src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。
 - src/agent/runtime.ts：Agent 主循环、工具调用、结构化提问、子 Agent 协作和 trace。
-- src/agent/tools.ts：移动端本地工具定义和执行边界。
-- src/llm/client.ts：供应商请求、响应归一化、输出截断检测和 Gemini schema 兼容处理。`callModel` 支持 `minOutputTokens` 选项，供结构上必须长输出的步骤抬高预算下限；也支持外部 `signal`，用于取消在途请求（后台蒸馏的取消入口）。
+- src/agent/tools.ts：移动端本地工具定义和执行边界。新增工具时必须同步 `src/settings/config.ts` 的 `TOOL_CATALOG`（权限页与默认权限来自它），两边不一致会出现"有工具没权限项"。
+- src/agent/tool-selection.ts：每个智能体实际拿到哪些工具（纯函数）。内容包里的 `toolNames` 白名单绑定在固定提交上，所以新增工具按"已有能力推导同类工具"下发：能列章节就能列卷，会写章节才带卷管理和文风工具。
+- src/agent/context-pruning.ts：发请求前把较早的只读工具结果换成占位符（纯函数）；只改发出去的那一份，主循环里的 `messages` 保持完整。
+- src/lib/text-match.ts：`edit_chapter` 局部替换用的文本匹配（纯函数），精确匹配失败时容忍空白差异。
+- src/llm/client.ts：供应商请求、响应归一化、输出截断检测和 Gemini schema 兼容处理。`callModel` 支持 `minOutputTokens` 选项，供结构上必须长输出的步骤抬高预算下限；也支持外部 `signal`，用于取消在途请求（后台蒸馏的取消入口）。流式走 `expo/fetch`（RN 自带 fetch 拿不到响应流），超时按"空闲时长"计。
+- src/llm/sse.ts：SSE 解析与四种协议的增量拼装（纯函数）。做法是把增量事件拼回非流式响应的形状，再交给 client.ts 现成的解析逻辑，截断检测等规则只维护一份。
 - src/settings/app-update.ts：查询本项目 GitHub 最新 Release 并与 app.json 的版本比较。`compareVersions` 按段做数值比较，不依赖 expo-constants。
 - src/data/database.ts：Expo SQLite 初始化、迁移和事务。
 - src/data/repositories.ts：作品、卷、章节、角色、世界书、会话、消息、模型和设置仓储。
@@ -266,6 +272,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - 包内核对：Hermes bundle（4,817,492 字节）按 1 字节命中全部 7 个新标识（jumpToBottom、sheetListScroll、questionScroll、formScroll 两处、modelSheetScroll、editSheetScroll、directoryListScroll），确认修复已进包。
 - 未做真机验证：进入定位最新、仅底部跟随、切页保留位置、悬浮按钮、长世界书条目保存、设置页与写作页弹层滚动都要在真机上确认一次。
 
+### 0.14.0 发布记录
+
+- 用户反馈：助手请求多时被 API 限流；另报思考型模型 `HTTP 400: The reasoning_content in the thinking mode must be passed back to the API`。
+- 限流排查结论（下次不必重复怀疑并发）：请求一直是串行的，主智能体与子智能体都是 `await` 跑完再下一个。真正的原因是三件事叠加——本地工具瞬间返回导致 24 次请求首尾相接、每轮重发全部工具结果导致单次请求越滚越大、429 默认只尝试 1 次直接判失败。另有一条按代码路径推断、未在真机复现的空转来源：默认输出上限 4096 时写章节的工具参数被截断，解析成空参数后工具报"缺少参数"，模型重发同一调用。
+- 修法：429 默认重试 3 次并拉长退避（额度不足不重试）；带工具调用的输出截断与非法 JSON 参数直接报错；新模型默认输出上限 8192；发请求前裁剪较早的只读工具结果；只读子智能体不带文风工具；`edit_chapter` 支持局部替换；流式接收与空闲超时。
+- `reasoning_content`：OpenAI 兼容 chat/completions 路径在 `AgentMessage`/`ModelTurn` 上保留该字段并在下一轮带回，空串也带回；Responses 接口未处理。
+- 新增 6 个卷/章节管理工具，`moveChapterToVolume` 会同步章级笔记的归属卷。
+- `compareVersions` 现在把预发布后缀（`-beta.N`）判为低于同号正式版；此前 `0.14.0` 会被判成小于 `0.14.0-beta.1`。
+- 验证方式：纯函数模块用 `npx tsc --ignoreConfig` 转译后在 Node 里断言；请求层对本地假模型服务器跑端到端场景，`expo/fetch` 用 Node 全局 `fetch` 顶替、`@/data/repositories` 打桩。测试脚本放在仓库外的临时目录，跑完即删，未入库。
+- 未做真机验证：流式在手机上走 `expo/fetch` 的原生实现，Node 里的验证不能代表它。出问题先关"设置 → 连接 → 流式接收回复"。
+- 已有模型的 `max_tokens` 不会被迁移，仍是用户原来的值（多为 4096），需要用户手动调高。
+- 构建：Gradle assembleRelease BUILD SUCCESSFUL（1m44s，583 个任务，无 GGUF 条目）；apksigner v2 通过、证书仍为 `c5dd7c04…`；aapt2 报 versionCode 27、versionName 0.14.0、minSdk 28、targetSdk 36、仅 arm64-v8a。
+- Release 资产 `OpenFicM-Android-0.14.0.apk`，132,796,036 字节（126.64 MiB），SHA-256 `6A7E0744077A50E4D3A03E204C758615298B88581391C7B00C5231DA3BBC3FE7`。
+- 包内核对：Hermes bundle 按 1 字节命中 `streamGenerateContent`、`reasoning_content`、`move_chapter_to_volume`、`old_content`、`connections.streamResponses`、`context.pruneToolOutputs`。
+- 构建方式的坑：从 Git Bash 用 `powershell -File build-release.ps1` 时，脚本末尾的 Get-FileHash 仍会因 PSModulePath 丢失而失败（APK 已生成）。本次改为 `powershell.exe -NoProfile -Command` 内联设置签名环境变量后直接调 `gradlew.bat -I gradle\mirrors.init.gradle assembleRelease --no-daemon`，再在 Bash 里做 GGUF 检查、复制改名和 `sha256sum`；不需要 `-ExecutionPolicy Bypass`。
+- 本次发布从工作分支 `feat/agent-rate-limit-alignment` 快进合入 main 后打标签。后续联网搜索、网页读取、角色关系图谱、笔记分类、计划工具、技能管理、附件读取按用户要求走测试版（`0.15.0-beta.N`，GitHub 预发布）。
+
 ## 7. 发布流程
 
 源码推送：
@@ -287,6 +310,8 @@ gh release create v0.9.0 .\OpenFicM-Android-0.9.0.apk --repo tioners/OpenFicM --
 ~~~
 
 不加 `--latest`：GitHub 会把最新发布的非草稿非预发布版本自动标为 latest，`/releases/latest` 已确认返回 v0.9.0。
+
+测试版要加 `--prerelease`：应用内检查更新读的是 `/releases/latest`，它不返回预发布版本，所以正式版用户不会被提示升级到测试版。测试版从工作分支打标签，推送时先推分支再推标签。
 
 不要把 APK 或签名文件加入 Git。发布前先用 apksigner、aapt2、Get-FileHash 检查资产；发布后用 gh release view v0.9.0 和 gh release list 验证标签及资产。
 
