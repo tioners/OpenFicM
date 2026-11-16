@@ -19,6 +19,12 @@ export interface AgentMessage {
    * DeepSeek 等供应商要求带工具调用的回复在下一轮原样带回，否则直接 400。
    */
   reasoningContent?: string;
+  /**
+   * Responses 接口随本条回复返回的 reasoning 条目（原样保留）。
+   * 思考型模型要求下一轮把它们放在对应的 function_call 之前带回，
+   * 否则报 "The reasoning_text in the thinking mode must be passed back to the API"。
+   */
+  reasoningItems?: Record<string, unknown>[];
 }
 
 export interface AgentToolDefinition {
@@ -32,4 +38,6 @@ export interface ModelTurn {
   toolCalls: AgentToolCall[];
   /** 见 AgentMessage.reasoningContent；供应商没返回时省略。 */
   reasoningContent?: string;
+  /** 见 AgentMessage.reasoningItems；没有时省略。 */
+  reasoningItems?: Record<string, unknown>[];
 }

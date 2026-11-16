@@ -19,7 +19,8 @@ import {
   setSetting,
 } from "@/data/repositories";
 import { createId } from "@/lib/id";
-import { exportBackup } from "@/lib/backup";
+import { exportBackup, importBackup } from "@/lib/backup";
+import { isDistilling } from "@/style/distillation-store";
 import { useAppStore } from "@/store/app-store";
 import {
   DEFAULT_INDEX_SETTINGS,
@@ -53,6 +54,9 @@ import {
   compareOhStoryVersions,
   getOhStoryUpdateState,
   installOhStoryRelease,
+  isOhStoryPackageComplete,
+  OH_STORY_AGENT_COUNT,
+  OH_STORY_SKILL_COUNT,
   rollbackOhStoryPackage,
   type OhStoryRelease,
   type OhStoryUpdateState,
@@ -71,6 +75,7 @@ export type SettingsCategory =
   | "general"
   | "connections"
   | "models"
+  | "web"
   | "index"
   | "context"
   | "style"
@@ -80,7 +85,9 @@ export type SettingsCategory =
   | "agents"
   | "advanced";
 
-const TITLES: Record<Exclude<SettingsCategory, "models">, string> = {
+type CategoryScreenKey = Exclude<SettingsCategory, "models" | "web">;
+
+const TITLES: Record<CategoryScreenKey, string> = {
   general: "通用",
   connections: "连接",
   index: "索引",
@@ -94,6 +101,26 @@ const TITLES: Record<Exclude<SettingsCategory, "models">, string> = {
 };
 
 const EMPTY_OH_STORY_STATE: OhStoryUpdateState = { installed: null, previous: null, lastCheck: null };
+
+const TOOL_GROUP_ORDER = ["章节与卷", "角色", "角色关系", "世界书", "笔记", "文风", "联网", "附件", "技能", "对话与协作"];
+
+/** 工具权限页的分组标题。 */
+function toolGroup(key: string): string {
+  if (/^web_/.test(key)) return "联网";
+  if (/_file$/.test(key)) return "附件";
+  if (/skill/.test(key)) return "技能";
+  if (/style|author/.test(key)) return "文风";
+  if (/relationship/.test(key)) return "角色关系";
+  if (/character/.test(key)) return "角色";
+  if (/world/.test(key)) return "世界书";
+  if (/note/.test(key)) return "笔记";
+  if (/chapter|volume|knowledge/.test(key)) return "章节与卷";
+  return "对话与协作";
+}
+
+const SORTED_TOOLS = [...TOOL_CATALOG].sort(
+  (left, right) => TOOL_GROUP_ORDER.indexOf(toolGroup(left.key)) - TOOL_GROUP_ORDER.indexOf(toolGroup(right.key)),
+);
 
 function SettingRow({ label, value, onPress, destructive = false }: {
   label: string;
@@ -119,9 +146,12 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-export function SettingsCategoryScreen({ category, onBack }: { category: Exclude<SettingsCategory, "models">; onBack: () => void }) {
+export function SettingsCategoryScreen({ category, onBack }: { category: CategoryScreenKey; onBack: () => void }) {
   const projectId = useAppStore((state) => state.currentProjectId);
   const refreshData = useAppStore((state) => state.refreshData);
+  const setCurrentProject = useAppStore((state) => state.setCurrentProject);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [skillManagement, setSkillManagement] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +206,40 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
     } finally {
       setBackupBusy(false);
     }
+  };
+
+  const runRestore = () => {
+    if (isDistilling()) {
+      setError("文风蒸馏正在进行，请等它结束或取消后再恢复备份");
+      return;
+    }
+    Alert.alert(
+      "从备份恢复",
+      "会用备份包覆盖当前全部作品、角色、世界书、笔记、文风和设置，无法撤销。建议先导出一份当前数据的备份。\n\nAPI Key 不在备份里，恢复后需要到“模型与供应商”和“联网搜索”里重新填写。",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "选择备份并恢复",
+          style: "destructive",
+          onPress: () => {
+            setRestoreBusy(true);
+            setError(null);
+            void importBackup({ beforeReplace: () => setCurrentProject(null) })
+              .then((restored) => {
+                if (!restored) return;
+                refreshData();
+                Alert.alert(
+                  "恢复完成",
+                  `已恢复 ${restored.projectCount} 部作品${restored.exportedAt ? `（备份时间 ${new Date(restored.exportedAt).toLocaleString()}）` : ""}。请回到书架重新打开作品，并重新填写 API Key。`,
+                );
+                void load();
+              })
+              .catch((restoreError) => setError(restoreError instanceof Error ? restoreError.message : String(restoreError)))
+              .finally(() => setRestoreBusy(false));
+          },
+        },
+      ],
+    );
   };
 
   const checkForAppUpdate = async () => {
@@ -238,6 +302,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       setMaxServerErrorAttempts(serverAttempts ?? "2");
       setMaxRateLimitAttempts(rateLimitAttempts ?? "3");
       setRetryOnTimeout(retryOnTimeoutValue === "true");
+      setSkillManagement((await getSetting("agent.skillManagement")) === "true");
       setStreamResponses(streamValue !== "false");
       setAvailableModels(nextModels);
       setOhStoryState(nextOhStoryState);
@@ -466,7 +531,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       );
       setOhStoryProgress(sourceChanged
         ? `${release.version} 的源码修订已变化，已阻止同版本静默覆盖`
-        : hasUpdate ? `发现 ${release.version}` : `已是最新版本 ${release.version}`);
+        : hasUpdate
+          ? `发现 ${release.version}`
+          : isOhStoryPackageComplete(ohStoryState.installed) ? `已是最新版本 ${release.version}` : `${release.version} 可补装新增技能`);
     } catch (checkError) {
       setError(checkError instanceof Error ? checkError.message : String(checkError));
       setOhStoryProgress("");
@@ -495,7 +562,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const confirmOhStoryInstall = (release: OhStoryRelease) => {
     Alert.alert(
       "更新 oh-story 内容包",
-      `将安装 ${release.version} 的 7 个 Skill 和 6 个移动端兼容子智能体。只导入 Markdown，不执行脚本或 Hook。`,
+      `将安装 ${release.version} 的 ${OH_STORY_SKILL_COUNT} 个 Skill 和 ${OH_STORY_AGENT_COUNT} 个移动端兼容子智能体。只导入 Markdown，不执行脚本或 Hook。`,
       [
         { text: "取消", style: "cancel" },
         { text: "更新", onPress: () => void installOhStory(release) },
@@ -528,8 +595,12 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
   const ohStoryUpdateAvailable = Boolean(
     ohStoryState.lastCheck
     && (!ohStoryState.installed
-      || compareOhStoryVersions(ohStoryState.lastCheck.version, ohStoryState.installed.version) > 0),
+      || compareOhStoryVersions(ohStoryState.lastCheck.version, ohStoryState.installed.version) > 0
+      // 版本没变但应用新支持了更多技能：允许用同一个 Release 补装。
+      || (compareOhStoryVersions(ohStoryState.lastCheck.version, ohStoryState.installed.version) === 0
+        && !isOhStoryPackageComplete(ohStoryState.installed))),
   );
+  const ohStoryIncomplete = Boolean(ohStoryState.installed) && !isOhStoryPackageComplete(ohStoryState.installed);
 
   if (loading) return <Screen><Header title={TITLES[category]} onBack={onBack} /><View style={styles.loading}><ActivityIndicator color={colors.primary} /></View></Screen>;
 
@@ -565,8 +636,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
           <Field label="自动保存延迟（毫秒）" value={autoSaveDelay} onChangeText={setAutoSaveDelay} onBlur={() => void savePreference("general.autoSaveDelay", autoSaveDelay)} keyboardType="number-pad" />
           <Field label="编辑器字号" value={editorFontSize} onChangeText={setEditorFontSize} onBlur={() => void savePreference("general.editorFontSize", editorFontSize)} keyboardType="number-pad" />
           <SettingRow label="数据位置" value="本机 SQLite · API Key 使用 SecureStore" />
-          <Button label={backupBusy ? "正在导出" : "导出全部数据备份"} variant="secondary" onPress={() => void runBackup()} disabled={backupBusy} loading={backupBusy} />
-          <Text style={styles.fieldHint}>备份包含全部作品、角色、世界书、笔记、文风、设置和参考书，打包成 zip 通过系统分享保存；恢复方式见压缩包里的说明。</Text>
+          <Button label={backupBusy ? "正在导出" : "导出全部数据备份"} variant="secondary" onPress={() => void runBackup()} disabled={backupBusy || restoreBusy} loading={backupBusy} />
+          <Button label={restoreBusy ? "正在恢复" : "从备份恢复"} variant="secondary" onPress={runRestore} disabled={backupBusy || restoreBusy} loading={restoreBusy} />
+          <Text style={styles.fieldHint}>备份包含全部作品、角色、世界书、笔记、文风、设置和参考书，打包成 zip 通过系统分享保存，不含 API Key。“从备份恢复”会先校验备份，通过后才覆盖当前数据；中途失败会自动还原。</Text>
         </View>
       ) : null}
       {category === "connections" ? (
@@ -624,17 +696,24 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       {category === "agent-tools" ? (
         <View style={styles.section}>
           <Text style={styles.sectionHint}>点击权限状态循环切换：允许、每次询问、禁止。</Text>
-          {TOOL_CATALOG.map((tool) => (
-            <Pressable key={tool.key} onPress={() => void cyclePermission(tool.key)} style={styles.permissionRow}>
-              <View style={styles.permissionText}>
-                <Text style={styles.settingLabel}>{tool.name}</Text>
-                <Text style={styles.settingValue}>{tool.key}</Text>
+          {SORTED_TOOLS.map((tool, index) => {
+            const group = toolGroup(tool.key);
+            const previous = index > 0 ? toolGroup(SORTED_TOOLS[index - 1].key) : "";
+            return (
+              <View key={tool.key}>
+                {group !== previous ? <Text style={styles.permissionGroup}>{group}</Text> : null}
+                <Pressable onPress={() => void cyclePermission(tool.key)} style={styles.permissionRow}>
+                  <View style={styles.permissionText}>
+                    <Text style={styles.settingLabel}>{tool.name}</Text>
+                    <Text style={styles.settingValue}>{tool.key}</Text>
+                  </View>
+                  <Text style={[styles.permissionMode, permissions[tool.key] === "deny" && styles.dangerText]}>
+                    {permissions[tool.key] === "allow" ? "允许" : permissions[tool.key] === "deny" ? "禁止" : "每次询问"}
+                  </Text>
+                </Pressable>
               </View>
-              <Text style={[styles.permissionMode, permissions[tool.key] === "deny" && styles.dangerText]}>
-                {permissions[tool.key] === "allow" ? "允许" : permissions[tool.key] === "deny" ? "禁止" : "每次询问"}
-              </Text>
-            </Pressable>
-          ))}
+            );
+          })}
         </View>
       ) : null}
       {category === "rules" ? (
@@ -662,6 +741,11 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
       ) : null}
       {category === "skills" ? (
         <View style={styles.section}>
+          <ToggleRow label="允许助手管理技能" value={skillManagement} onChange={(value) => {
+            setSkillManagement(value);
+            void savePreference("agent.skillManagement", String(value));
+          }} />
+          <Text style={styles.sectionHint}>开启后主智能体可以列出、查看、新建、修改和删除自定义技能（多带 5 个工具，每次请求会略大）。助手新建的技能默认关闭，要你在这里启用才生效；内置技能和已启用的技能它改不了。</Text>
           {skills.map((skill) => (
             <View key={skill.id} style={styles.manageRow}>
               <View style={styles.manageText}>
@@ -774,8 +858,11 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Exclude
             </>
           ) : null}
           <Button label={ohStoryBusy ? "处理中" : "检查 GitHub Release"} onPress={() => void checkOhStory()} disabled={ohStoryBusy} loading={ohStoryBusy && ohStoryProgress.includes("检查")} />
+          {ohStoryIncomplete ? (
+            <Text style={styles.progressText}>这个版本新增支持 5 个 oh-story 技能和 1 个子智能体。点“检查 GitHub Release”后再点更新即可补装。</Text>
+          ) : null}
           {ohStoryUpdateAvailable && ohStoryState.lastCheck ? (
-            <Button label={`更新到 ${ohStoryState.lastCheck.version}`} onPress={() => confirmOhStoryInstall(ohStoryState.lastCheck as OhStoryRelease)} disabled={ohStoryBusy} />
+            <Button label={ohStoryIncomplete && ohStoryState.installed?.version === ohStoryState.lastCheck.version ? `补装 ${ohStoryState.lastCheck.version} 的新增技能` : `更新到 ${ohStoryState.lastCheck.version}`} onPress={() => confirmOhStoryInstall(ohStoryState.lastCheck as OhStoryRelease)} disabled={ohStoryBusy} />
           ) : null}
           {ohStoryState.previous ? (
             <Button label={`回滚到 ${ohStoryState.previous.version}`} variant="secondary" onPress={confirmOhStoryRollback} disabled={ohStoryBusy} />
@@ -819,6 +906,7 @@ const styles = themedStyles((colors) => StyleSheet.create({
   settingRow: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   settingLabel: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
   settingValue: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 19, textAlign: "right" },
+  permissionGroup: { marginTop: spacing.md, color: colors.primary, fontSize: 13, fontWeight: "700" },
   permissionRow: { minHeight: 60, flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   permissionText: { flex: 1, minWidth: 0 },
   permissionMode: { minWidth: 64, color: colors.primary, fontSize: 13, fontWeight: "700", textAlign: "right" },

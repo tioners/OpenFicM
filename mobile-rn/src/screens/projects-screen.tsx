@@ -7,8 +7,9 @@ import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text,
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { Button, EmptyState, ErrorNotice, Field, Header, Screen } from "@/components/ui";
-import { createProject, deleteProject, listProjects } from "@/data/repositories";
+import { createProject, deleteProject, listProjects, renameProject } from "@/data/repositories";
 import { exportBackup } from "@/lib/backup";
+import { importBookFile } from "@/lib/book-import";
 import type { RootStackParamList, RootTabParamList } from "@/navigation/types";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
@@ -25,6 +26,10 @@ export function ProjectsScreen() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Project | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [importing, setImporting] = useState(false);
   const setCurrentProject = useAppStore((state) => state.setCurrentProject);
   const currentProjectId = useAppStore((state) => state.currentProjectId);
   const loadProjects = useCallback(async () => {
@@ -66,6 +71,59 @@ export function ProjectsScreen() {
     }
   };
 
+  const importBook = async () => {
+    if (importing) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const imported = await importBookFile();
+      if (!imported) return;
+      setProjects(await listProjects());
+      Alert.alert(
+        "导入完成",
+        `《${imported.project.title}》已导入：${imported.volumeCount} 卷、${imported.chapterCount} 章。`
+          + (imported.splitByLength ? "\n\n没有识别到“第X章”这样的标题，正文是按长度切分的。" : ""),
+        [
+          { text: "留在书架", style: "cancel" },
+          { text: "打开作品", onPress: () => openProject(imported.project) },
+        ],
+      );
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : String(importError));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const showProjectActions = (project: Project) => {
+    Alert.alert(project.title, undefined, [
+      {
+        text: "重命名",
+        onPress: () => {
+          setRenameTitle(project.title);
+          setRenameTarget(project);
+        },
+      },
+      { text: "删除作品", style: "destructive", onPress: () => confirmDelete(project) },
+      { text: "取消", style: "cancel" },
+    ]);
+  };
+
+  const submitRename = async () => {
+    if (!renameTarget || !renameTitle.trim()) return;
+    setRenaming(true);
+    setError(null);
+    try {
+      const updated = await renameProject(renameTarget.id, renameTitle);
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setRenameTarget(null);
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : String(renameError));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const confirmDelete = (project: Project) => {
     Alert.alert("删除作品", `确定删除《${project.title}》及全部本地数据？此操作不可恢复。`, [
       { text: "取消", style: "cancel" },
@@ -95,9 +153,16 @@ export function ProjectsScreen() {
       <Header
         title="OpenFicM"
         action={
-          <Pressable accessibilityLabel="新建作品" onPress={() => setShowCreate(true)} style={styles.iconButton}>
-            <Ionicons name="add" size={26} color={colors.primary} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable accessibilityLabel="导入书籍" disabled={importing} onPress={() => void importBook()} style={styles.iconButton}>
+              {importing
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Ionicons name="folder-open-outline" size={23} color={colors.primary} />}
+            </Pressable>
+            <Pressable accessibilityLabel="新建作品" onPress={() => setShowCreate(true)} style={styles.iconButton}>
+              <Ionicons name="add" size={26} color={colors.primary} />
+            </Pressable>
+          </View>
         }
       />
       <FlatList
@@ -145,13 +210,13 @@ export function ProjectsScreen() {
         }
         ListEmptyComponent={loading ? <ActivityIndicator color={colors.primary} /> : <EmptyState title="还没有作品" action={<Button label="新建作品" onPress={() => setShowCreate(true)} />} />}
         renderItem={({ item }) => (
-          <Pressable onPress={() => openProject(item)} onLongPress={() => confirmDelete(item)} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+          <Pressable onPress={() => openProject(item)} onLongPress={() => showProjectActions(item)} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
             <View style={styles.cover}><Text style={styles.coverText}>{item.title.slice(0, 1)}</Text></View>
             <View style={styles.rowText}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
               <Text style={styles.description} numberOfLines={2}>{item.description || "暂无简介"}</Text>
             </View>
-            <Pressable accessibilityLabel="删除作品" onPress={(event) => { event.stopPropagation(); confirmDelete(item); }} hitSlop={8} style={styles.rowAction}>
+            <Pressable accessibilityLabel="作品操作" onPress={(event) => { event.stopPropagation(); showProjectActions(item); }} hitSlop={8} style={styles.rowAction}>
               <Ionicons name="ellipsis-horizontal" size={20} color={colors.textMuted} />
             </Pressable>
           </Pressable>
@@ -171,12 +236,26 @@ export function ProjectsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior="height" automaticOffset>
+          <View style={styles.modalBody}>
+            <Text style={styles.modalTitle}>重命名作品</Text>
+            <Field label="书名" value={renameTitle} onChangeText={setRenameTitle} autoFocus />
+            <View style={styles.modalActions}>
+              <Button label="取消" variant="secondary" onPress={() => setRenameTarget(null)} />
+              <Button label="保存" onPress={() => void submitRename()} disabled={!renameTitle.trim()} loading={renaming} />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </Screen>
   );
 }
 
 const styles = themedStyles((colors) => StyleSheet.create({
   iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  headerActions: { flexDirection: "row", alignItems: "center" },
   quickActions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   quickAction: { flex: 1, minHeight: 54, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surface },
   quickActionDisabled: { opacity: 0.48 },

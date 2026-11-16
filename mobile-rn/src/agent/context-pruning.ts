@@ -17,7 +17,7 @@ export const PRUNE_MINIMUM_CHARACTERS = 40_000;
 export const PRUNE_KEEP_RECENT = 4;
 
 /** 只读工具：结果可以安全丢弃，需要时重新调用即可。 */
-const READ_ONLY_TOOL_PATTERN = /^(list_|read_|search_)/;
+const READ_ONLY_TOOL_PATTERN = /^(list_|read_|search_|web_|query_|get_)/;
 
 function prunedContent(message: AgentMessage): string {
   const characters = message.content.length;

@@ -262,6 +262,7 @@ function openAiResponsesAccumulator(): StreamAccumulator {
   const items: Record<string, any>[] = [];
   let failure: string | null = null;
   let sawText = false;
+  let reasoningText = "";
 
   return {
     push(event) {
@@ -272,6 +273,8 @@ function openAiResponsesAccumulator(): StreamAccumulator {
         failure = errorText(data.error ?? data) ?? "未知错误";
       } else if (type === "response.output_text.delta") {
         sawText = true;
+      } else if (type === "response.reasoning_text.delta" && typeof data.delta === "string") {
+        reasoningText += data.delta;
       } else if (type === "response.output_item.done" && isRecord(data.item)) {
         items.push(data.item);
       } else if ((type === "response.completed" || type === "response.incomplete" || type === "response.failed") && isRecord(data.response)) {
@@ -281,7 +284,15 @@ function openAiResponsesAccumulator(): StreamAccumulator {
     result() {
       const response: Record<string, any> = finalResponse ?? {};
       // 有的中转站在 completed 事件里不带 output，用逐项完成事件兜底。
-      const output = Array.isArray(response.output) && response.output.length ? response.output : items;
+      let output: Record<string, any>[] = Array.isArray(response.output) && response.output.length ? response.output : items;
+      // 有的中转站只用增量事件吐推理文本、不给完整的 reasoning 条目；下一轮又要求带回，
+      // 这里按标准形状补一条放在最前面。
+      if (reasoningText && !output.some((item) => isRecord(item) && item.type === "reasoning")) {
+        output = [
+          { type: "reasoning", summary: [], content: [{ type: "reasoning_text", text: reasoningText }] },
+          ...output,
+        ];
+      }
       return { ...response, output };
     },
     error: () => failure,

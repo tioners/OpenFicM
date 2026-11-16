@@ -451,7 +451,11 @@ async function callOpenAiResponses(
     }
     if (turn.incompleteReason) throw new Error(`模型没有返回内容（incomplete_details.reason=${turn.incompleteReason}）`);
   }
-  return { content: turn.content, toolCalls: turn.toolCalls };
+  return {
+    content: turn.content,
+    toolCalls: turn.toolCalls,
+    ...(turn.reasoningItems.length ? { reasoningItems: turn.reasoningItems } : {}),
+  };
 }
 
 /** Gemini 只接受 OpenAPI 子集，这些 JSON Schema 关键字会被 400 拒绝。 */

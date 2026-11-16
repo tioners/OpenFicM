@@ -21,6 +21,7 @@ import { fetchProviderModels, type RemoteModel } from "@/llm/model-catalog";
 import { DEFAULT_MAX_OUTPUT_TOKENS, MAX_CONFIGURED_OUTPUT_TOKENS } from "@/llm/limits";
 import type { RootStackParamList } from "@/navigation/types";
 import { SettingsCategoryScreen, type SettingsCategory } from "@/screens/settings-category-screen";
+import { WebSearchSettingsScreen } from "@/screens/web-search-settings";
 import { useAppStore } from "@/store/app-store";
 import { colors, radius, spacing } from "@/theme";
 import { themedStyles } from "@/themed-styles";
@@ -45,6 +46,7 @@ const settingsCategories: Array<{
   { id: "general", label: "通用", icon: "options-outline" },
   { id: "connections", label: "连接", icon: "link-outline" },
   { id: "models", label: "模型与供应商", icon: "hardware-chip-outline" },
+  { id: "web", label: "联网搜索", icon: "globe-outline" },
   { id: "index", label: "索引", icon: "layers-outline" },
   { id: "context", label: "上下文", icon: "document-text-outline" },
   { id: "style", label: "作者文风", icon: "color-wand-outline" },
@@ -359,6 +361,10 @@ export function SettingsScreen() {
     return remoteModels.filter((model) => model.name.toLowerCase().includes(keyword)
       || model.id.toLowerCase().includes(keyword));
   }, [modelFilter, remoteModels]);
+
+  if (activeCategory === "web") {
+    return <WebSearchSettingsScreen onBack={() => setActiveCategory(null)} />;
+  }
 
   if (activeCategory && activeCategory !== "models") {
     return <SettingsCategoryScreen category={activeCategory} onBack={() => setActiveCategory(null)} />;

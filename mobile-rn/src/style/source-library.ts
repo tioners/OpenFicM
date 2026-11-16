@@ -89,7 +89,8 @@ function formatForExtension(extension: string): StyleSourceFormat {
   throw new Error("仅支持 TXT、Markdown 和 EPUB 文件");
 }
 
-function decodeText(bytes: Uint8Array): string {
+/** 自动识别 UTF-8 / UTF-16 / GB18030。书籍导入、附件和网页读取也用它。 */
+export function decodeText(bytes: Uint8Array): string {
   const buffer = Buffer.from(bytes);
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return iconv.decode(buffer.subarray(3), "utf8");
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return iconv.decode(buffer.subarray(2), "utf16-le");
@@ -102,7 +103,7 @@ function decodeText(bytes: Uint8Array): string {
   return gbReplacementCount < utf8ReplacementCount ? gb18030 : utf8;
 }
 
-function normalizeText(value: string): string {
+export function normalizeText(value: string): string {
   return value
     .replace(/^\uFEFF/, "")
     .replace(/\r\n?/g, "\n")
@@ -183,7 +184,7 @@ function extractMarkupText(value: string): string {
   return normalizeText(fallbackMarkupText(value));
 }
 
-function extractEpub(bytes: Uint8Array): { title: string | null; text: string; skippedSections: number } {
+export function extractEpub(bytes: Uint8Array): { title: string | null; text: string; skippedSections: number } {
   let totalTextBytes = 0;
   const entries = unzipSync(bytes, {
     filter: (entry) => {

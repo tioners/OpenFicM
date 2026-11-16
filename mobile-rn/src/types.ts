@@ -36,11 +36,65 @@ export interface Note {
   projectId: string;
   volumeId: string | null;
   chapterId: string | null;
+  /** 可选的分类；与整书/卷/章的归属层级互相独立。 */
+  categoryId: string | null;
   title: string;
   content: string;
   orderIndex: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NoteCategory {
+  id: string;
+  projectId: string;
+  title: string;
+  orderIndex: number;
+}
+
+export type SearchProviderType = "tavily" | "zhipu" | "brave" | "serper" | "jina" | "exa" | "searxng";
+
+/** 联网搜索服务：和模型供应商一样由用户自行添加，Key 存 SecureStore。 */
+export interface SearchProvider {
+  id: string;
+  name: string;
+  type: SearchProviderType;
+  baseUrl: string;
+  apiKeyRef: string;
+  createdAt: string;
+}
+
+export type ChatAttachmentFormat = "txt" | "markdown" | "docx" | "epub";
+
+/** 会话附件的元信息；正文只在读取工具里按需取出。 */
+export interface ChatAttachment {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  fileName: string;
+  format: ChatAttachmentFormat;
+  sizeBytes: number;
+  characterCount: number;
+  createdAt: string;
+}
+
+export interface CharacterRelationship {
+  id: string;
+  projectId: string;
+  sourceCharacterId: string;
+  targetCharacterId: string;
+  name: string;
+  description: string;
+  updatedAt: string;
+}
+
+export type PlanTodoStatus = "pending" | "in_progress" | "completed";
+export type PlanTodoPriority = "low" | "medium" | "high";
+
+export interface PlanTodo {
+  content: string;
+  status: PlanTodoStatus;
+  priority: PlanTodoPriority;
 }
 
 export type StyleSourceFormat = "txt" | "markdown" | "epub";

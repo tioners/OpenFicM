@@ -202,6 +202,80 @@ export async function createProject(title: string, description = ""): Promise<Pr
   return { id, title: normalizedTitle, description: normalizedDescription, createdAt: now, updatedAt: now };
 }
 
+/** 修改作品名。来自社区补丁（打包一份凉皮）。 */
+export async function renameProject(id: string, title: string): Promise<Project> {
+  const db = await getDatabase();
+  const normalizedTitle = requiredText(title, "作品名");
+  const existing = await db.getFirstAsync<ProjectRow>("SELECT * FROM projects WHERE id = ?", id);
+  if (!existing) throw new Error("作品不存在");
+  const now = new Date().toISOString();
+  await db.runAsync("UPDATE projects SET title = ?, updated_at = ? WHERE id = ?", normalizedTitle, now, id);
+  return mapProject({ ...existing, title: normalizedTitle, updated_at: now });
+}
+
+export interface ImportedVolume {
+  title: string;
+  chapters: { title: string; content: string }[];
+}
+
+/**
+ * 把一本已经拆好卷章的书作为新作品写入。
+ * 整本书在一个事务里完成：中途失败不会留下半本书，上千章也只开一次事务。
+ */
+export async function createProjectFromImport(input: {
+  title: string;
+  description?: string;
+  volumes: ImportedVolume[];
+}): Promise<{ project: Project; chapterCount: number }> {
+  const db = await getDatabase();
+  const title = requiredText(input.title, "作品名");
+  const description = (input.description ?? "").trim();
+  const volumes = input.volumes.filter((volume) => volume.chapters.length > 0);
+  if (!volumes.length) throw new Error("没有可导入的章节");
+  for (const volume of volumes) {
+    requiredText(volume.title, "卷名");
+    for (const chapter of volume.chapters) {
+      requiredText(chapter.title, "章节标题");
+      validateChapterContent(chapter.content);
+    }
+  }
+  const projectId = createId();
+  const now = new Date().toISOString();
+  let chapterCount = 0;
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.runAsync(
+      "INSERT INTO projects(id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      projectId, title, description, now, now,
+    );
+    for (let volumeIndex = 0; volumeIndex < volumes.length; volumeIndex += 1) {
+      const volume = volumes[volumeIndex];
+      const volumeId = createId();
+      await txn.runAsync(
+        "INSERT INTO volumes(id, project_id, title, order_index) VALUES (?, ?, ?, ?)",
+        volumeId, projectId, volume.title.trim(), volumeIndex + 1,
+      );
+      for (let chapterIndex = 0; chapterIndex < volume.chapters.length; chapterIndex += 1) {
+        const chapter = volume.chapters[chapterIndex];
+        const chapterId = createId();
+        const chapterTitle = chapter.title.trim();
+        await txn.runAsync(
+          "INSERT INTO chapters(id, project_id, volume_id, title, content, order_index, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          chapterId, projectId, volumeId, chapterTitle, chapter.content, chapterIndex + 1, now,
+        );
+        await txn.runAsync(
+          "INSERT INTO chapter_fts(chapter_id, project_id, title, content) VALUES (?, ?, ?, ?)",
+          chapterId, projectId, chapterTitle, chapter.content,
+        );
+        chapterCount += 1;
+      }
+    }
+  });
+  return {
+    project: { id: projectId, title, description, createdAt: now, updatedAt: now },
+    chapterCount,
+  };
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDatabase();
   await db.withExclusiveTransactionAsync(async (txn) => {
@@ -210,11 +284,14 @@ export async function deleteProject(id: string): Promise<void> {
     await txn.runAsync("DELETE FROM chapter_drafts WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM chapter_fts WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM vector_chunks WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM chat_attachments WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM chat_messages WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM chat_sessions WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM notes WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM note_categories WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM chapters WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM volumes WHERE project_id = ?", id);
+    await txn.runAsync("DELETE FROM character_relationships WHERE project_id = ?", id);
     await txn.runAsync("DELETE FROM characters WHERE project_id = ?", id);
     await txn.runAsync(
       "DELETE FROM world_info_entries WHERE world_info_id IN (SELECT id FROM world_info WHERE project_id = ?)",
@@ -715,6 +792,7 @@ export async function updateChatSession(input: {
 
 export async function deleteChatSession(id: string): Promise<void> {
   const db = await getDatabase();
+  await db.runAsync("DELETE FROM chat_attachments WHERE session_id = ?", id);
   await db.runAsync("DELETE FROM chat_sessions WHERE id = ?", id);
 }
 
@@ -944,6 +1022,11 @@ export async function deleteCharacter(id: string): Promise<void> {
     await txn.runAsync(
       "DELETE FROM vector_chunks WHERE project_id = ? AND source_type = 'character' AND source_id = ?",
       character.project_id,
+      id,
+    );
+    await txn.runAsync(
+      "DELETE FROM character_relationships WHERE source_character_id = ? OR target_character_id = ?",
+      id,
       id,
     );
     await txn.runAsync("DELETE FROM characters WHERE id = ?", id);

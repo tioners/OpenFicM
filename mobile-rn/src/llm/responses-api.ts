@@ -21,6 +21,8 @@ export interface ResponsesTurn {
   incompleteReason: string;
   /** 供应商显式返回的失败信息。 */
   failureMessage: string;
+  /** 输出里的 reasoning 条目，原样保留，下一轮要带回。 */
+  reasoningItems: Record<string, unknown>[];
 }
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -50,6 +52,10 @@ export function responsesInputItems(messages: AgentMessage[]): Record<string, un
       if (!message.toolCallId) continue;
       items.push({ type: "function_call_output", call_id: message.toolCallId, output: message.content });
       continue;
+    }
+    // reasoning 条目必须排在它所属的正文和 function_call 之前，顺序与模型输出一致。
+    if (message.role === "assistant" && message.reasoningItems?.length) {
+      items.push(...message.reasoningItems);
     }
     if (message.content.trim()) {
       items.push({ role: message.role === "assistant" ? "assistant" : "user", content: message.content });
@@ -107,5 +113,6 @@ export function parseResponsesTurn(data: Record<string, any>): ResponsesTurn {
     ? data.incomplete_details.reason
     : "";
   const failureMessage = isRecord(data.error) && typeof data.error.message === "string" ? data.error.message : "";
-  return { content, toolCalls, incompleteReason, failureMessage };
+  const reasoningItems = output.filter((item) => item.type === "reasoning");
+  return { content, toolCalls, incompleteReason, failureMessage, reasoningItems };
 }

@@ -1,5 +1,5 @@
 import { createId } from "@/lib/id";
-import type { Note, NoteScope } from "@/types";
+import type { Note, NoteCategory, NoteScope } from "@/types";
 
 import { getDatabase } from "./database";
 
@@ -11,6 +11,7 @@ type NoteRow = {
   project_id: string;
   volume_id: string | null;
   chapter_id: string | null;
+  category_id: string | null;
   title: string;
   content: string;
   order_index: number;
@@ -23,6 +24,7 @@ const mapNote = (row: NoteRow): Note => ({
   projectId: row.project_id,
   volumeId: row.volume_id,
   chapterId: row.chapter_id,
+  categoryId: row.category_id ?? null,
   title: row.title,
   content: row.content,
   orderIndex: row.order_index,
@@ -125,6 +127,7 @@ export async function createNote(input: {
   content?: string;
   volumeId?: string | null;
   chapterId?: string | null;
+  categoryId?: string | null;
 }): Promise<Note> {
   const database = await getDatabase();
   const project = await database.getFirstAsync<{ id: string }>(
@@ -138,6 +141,7 @@ export async function createNote(input: {
     throw new Error(`笔记内容超过 ${MAX_NOTE_CONTENT_CHARACTERS} 字符限制`);
   }
   const target = await resolveTarget(input.projectId, input);
+  const categoryId = await resolveCategory(input.projectId, input.categoryId);
   const id = createId();
   const now = new Date().toISOString();
   const next = await database.getFirstAsync<{ value: number }>(
@@ -149,12 +153,13 @@ export async function createNote(input: {
   );
   const orderIndex = next?.value ?? 0;
   await database.runAsync(
-    `INSERT INTO notes(id, project_id, volume_id, chapter_id, title, content, order_index, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO notes(id, project_id, volume_id, chapter_id, category_id, title, content, order_index, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     input.projectId,
     target.volumeId,
     target.chapterId,
+    categoryId,
     title,
     content,
     orderIndex,
@@ -166,6 +171,7 @@ export async function createNote(input: {
     projectId: input.projectId,
     volumeId: target.volumeId,
     chapterId: target.chapterId,
+    categoryId,
     title,
     content,
     orderIndex,
@@ -178,6 +184,8 @@ export async function updateNote(input: {
   id: string;
   title?: string;
   content?: string;
+  /** undefined 表示不改；null 表示移出分类。 */
+  categoryId?: string | null;
 }): Promise<Note> {
   const database = await getDatabase();
   const existing = await database.getFirstAsync<NoteRow>("SELECT * FROM notes WHERE id = ?", input.id);
@@ -189,15 +197,19 @@ export async function updateNote(input: {
   if (content.length > MAX_NOTE_CONTENT_CHARACTERS) {
     throw new Error(`笔记内容超过 ${MAX_NOTE_CONTENT_CHARACTERS} 字符限制`);
   }
+  const categoryId = input.categoryId === undefined
+    ? existing.category_id ?? null
+    : await resolveCategory(existing.project_id, input.categoryId);
   const updatedAt = new Date().toISOString();
   await database.runAsync(
-    "UPDATE notes SET title = ?, content = ?, updated_at = ? WHERE id = ?",
+    "UPDATE notes SET title = ?, content = ?, category_id = ?, updated_at = ? WHERE id = ?",
     title,
     content,
+    categoryId,
     updatedAt,
     input.id,
   );
-  return mapNote({ ...existing, title, content, updated_at: updatedAt });
+  return mapNote({ ...existing, title, content, category_id: categoryId, updated_at: updatedAt });
 }
 
 export async function moveNote(id: string, target: NoteTarget): Promise<Note> {
@@ -280,4 +292,92 @@ export async function deleteNotesUnder(input: {
       input.volumeId,
     );
   }
+}
+
+type NoteCategoryRow = { id: string; project_id: string; title: string; order_index: number };
+
+const mapCategory = (row: NoteCategoryRow): NoteCategory => ({
+  id: row.id,
+  projectId: row.project_id,
+  title: row.title,
+  orderIndex: row.order_index,
+});
+
+const MAX_CATEGORY_TITLE_CHARACTERS = 60;
+
+async function resolveCategory(projectId: string, categoryId: string | null | undefined): Promise<string | null> {
+  const normalized = categoryId?.trim() || null;
+  if (!normalized) return null;
+  const database = await getDatabase();
+  const category = await database.getFirstAsync<{ project_id: string }>(
+    "SELECT project_id FROM note_categories WHERE id = ?",
+    normalized,
+  );
+  if (!category) throw new Error("笔记分类不存在");
+  if (category.project_id !== projectId) throw new Error("笔记分类不属于当前作品");
+  return normalized;
+}
+
+export async function listNoteCategories(projectId: string): Promise<NoteCategory[]> {
+  const database = await getDatabase();
+  return (await database.getAllAsync<NoteCategoryRow>(
+    "SELECT * FROM note_categories WHERE project_id = ? ORDER BY order_index, created_at",
+    projectId,
+  )).map(mapCategory);
+}
+
+async function assertCategoryTitleFree(projectId: string, title: string, exceptId: string | null): Promise<void> {
+  const database = await getDatabase();
+  const duplicate = await database.getFirstAsync<{ id: string }>(
+    "SELECT id FROM note_categories WHERE project_id = ? AND title = ? AND id <> ?",
+    projectId,
+    title,
+    exceptId ?? "",
+  );
+  if (duplicate) throw new Error("同名的笔记分类已存在");
+}
+
+export async function createNoteCategory(projectId: string, title: string): Promise<NoteCategory> {
+  const database = await getDatabase();
+  const project = await database.getFirstAsync<{ id: string }>("SELECT id FROM projects WHERE id = ?", projectId);
+  if (!project) throw new Error("作品不存在");
+  const normalized = requiredText(title, "分类名称", MAX_CATEGORY_TITLE_CHARACTERS);
+  await assertCategoryTitleFree(projectId, normalized, null);
+  const next = await database.getFirstAsync<{ value: number }>(
+    "SELECT COALESCE(MAX(order_index), -1) + 1 AS value FROM note_categories WHERE project_id = ?",
+    projectId,
+  );
+  const id = createId();
+  const now = new Date().toISOString();
+  const orderIndex = next?.value ?? 0;
+  await database.runAsync(
+    "INSERT INTO note_categories(id, project_id, title, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    id, projectId, normalized, orderIndex, now, now,
+  );
+  return { id, projectId, title: normalized, orderIndex };
+}
+
+export async function renameNoteCategory(id: string, title: string): Promise<NoteCategory> {
+  const database = await getDatabase();
+  const existing = await database.getFirstAsync<NoteCategoryRow>("SELECT * FROM note_categories WHERE id = ?", id);
+  if (!existing) throw new Error("笔记分类不存在");
+  const normalized = requiredText(title, "分类名称", MAX_CATEGORY_TITLE_CHARACTERS);
+  await assertCategoryTitleFree(existing.project_id, normalized, id);
+  await database.runAsync(
+    "UPDATE note_categories SET title = ?, updated_at = ? WHERE id = ?",
+    normalized, new Date().toISOString(), id,
+  );
+  return mapCategory({ ...existing, title: normalized });
+}
+
+/** 删除分类：其中的笔记保留，只是变回未分类。 */
+export async function deleteNoteCategory(id: string): Promise<{ releasedNotes: number }> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<{ value: number }>(
+    "SELECT COUNT(*) AS value FROM notes WHERE category_id = ?",
+    id,
+  );
+  await database.runAsync("UPDATE notes SET category_id = NULL WHERE category_id = ?", id);
+  await database.runAsync("DELETE FROM note_categories WHERE id = ?", id);
+  return { releasedNotes: row?.value ?? 0 };
 }

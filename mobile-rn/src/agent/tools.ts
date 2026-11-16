@@ -48,6 +48,14 @@ import { replaceText } from "@/lib/text-match";
 import { getAuthorStyleGuide, saveAuthorStyleGuide } from "@/settings/lorn-style-plugin";
 import { readStyleSourceSample } from "@/style/source-library";
 
+import {
+  directRelationships,
+  executeWorkspaceTool,
+  isWorkspaceTool,
+  workspaceTools,
+  type ToolExecutionContext,
+} from "./workspace-tools";
+
 const MAX_TOOL_TEXT_CHARACTERS = 20_000;
 
 function boundedToolText(value: string, maximum = MAX_TOOL_TEXT_CHARACTERS): { text: string; truncated: boolean } {
@@ -334,6 +342,7 @@ export const agentTools: AgentToolDefinition[] = [
         content: { type: "string", description: "笔记内容" },
         volume_id: { type: "string", description: "归属卷 ID；只写卷则为卷级笔记" },
         chapter_id: { type: "string", description: "归属章节 ID；写了则为章级笔记，卷自动跟随该章" },
+        category_id: { type: "string", description: "可选的笔记分类 ID，来自 list_note_categories" },
       },
       required: ["title", "content"],
       additionalProperties: false,
@@ -506,6 +515,7 @@ export const agentTools: AgentToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  ...workspaceTools,
 ];
 
 function requiredString(args: Record<string, unknown>, key: string): string {
@@ -531,7 +541,11 @@ export async function executeAgentTool(
   projectId: string,
   name: string,
   args: Record<string, unknown>,
+  context?: Omit<ToolExecutionContext, "projectId">,
 ): Promise<Record<string, unknown>> {
+  if (isWorkspaceTool(name)) {
+    return executeWorkspaceTool({ projectId, sessionId: context?.sessionId ?? null, signal: context?.signal }, name, args);
+  }
   if (name === "list_chapters") {
     const chapters = await listChapters(projectId);
     return { chapters: chapters.map(({ id, title, volumeId, orderIndex, updatedAt }) => ({ id, title, volumeId, orderIndex, updatedAt })) };
@@ -574,7 +588,11 @@ export async function executeAgentTool(
     const character = await getCharacter(requiredString(args, "character_id"));
     if (!character || character.projectId !== projectId) throw new Error("未找到角色");
     const description = boundedToolText(character.description);
-    return { character: { ...character, description: description.text }, description_truncated: description.truncated };
+    return {
+      character: { ...character, description: description.text },
+      description_truncated: description.truncated,
+      relationships: await directRelationships(projectId, character.id),
+    };
   }
   if (name === "list_world_entries") {
     const worldInfo = await getOrCreateWorldInfo(projectId);
@@ -731,6 +749,7 @@ export async function executeAgentTool(
         scope: noteScope(note),
         volume_id: note.volumeId,
         chapter_id: note.chapterId,
+        category_id: note.categoryId,
         characters: note.content.length,
         updated_at: note.updatedAt,
       })),
@@ -752,6 +771,7 @@ export async function executeAgentTool(
       content: requiredString(args, "content"),
       volumeId: optionalString(args, "volume_id"),
       chapterId: optionalString(args, "chapter_id"),
+      categoryId: optionalString(args, "category_id"),
     });
     return { success: true, note_id: note.id, title: note.title, scope: noteScope(note) };
   }

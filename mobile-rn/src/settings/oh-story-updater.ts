@@ -40,6 +40,11 @@ const SKILL_SOURCES = [
   { path: "skills/story-long-analyze/SKILL.md", name: "长篇拆文" },
   { path: "skills/story-short-analyze/SKILL.md", name: "短篇拆文" },
   { path: "skills/story-deslop/SKILL.md", name: "网文去 AI 味" },
+  { path: "skills/story-import/SKILL.md", name: "导入已有小说" },
+  { path: "skills/story-publish/SKILL.md", name: "发布资料准备" },
+  { path: "skills/story-cover/SKILL.md", name: "封面提示词设计" },
+  { path: "skills/story-long-scan/SKILL.md", name: "长篇扫榜" },
+  { path: "skills/story-short-scan/SKILL.md", name: "短篇扫榜" },
 ] as const;
 
 const AGENT_SOURCES = [
@@ -49,7 +54,19 @@ const AGENT_SOURCES = [
   { path: "skills/story-setup/references/opencode/agents/narrative-writer.md", key: "narrative-writer", name: "正文写作", tools: [...READ_TOOL_NAMES, ...CHAPTER_WRITE_TOOL_NAMES] },
   { path: "skills/story-setup/references/opencode/agents/story-architect.md", key: "story-architect", name: "故事架构", tools: [...READ_TOOL_NAMES, ...CHARACTER_WRITE_TOOL_NAMES, ...WORLD_WRITE_TOOL_NAMES] },
   { path: "skills/story-setup/references/opencode/agents/story-explorer.md", key: "story-explorer", name: "故事探索", tools: READ_TOOL_NAMES },
+  // 联网工具按运行时规则下发（见 agent/tool-selection.ts）：配置了搜索服务后它才能联网。
+  { path: "skills/story-setup/references/opencode/agents/story-researcher.md", key: "story-researcher", name: "资料调研", tools: READ_TOOL_NAMES },
 ] as const;
+
+export const OH_STORY_SKILL_COUNT = SKILL_SOURCES.length;
+export const OH_STORY_AGENT_COUNT = AGENT_SOURCES.length;
+
+/** 已安装的内容包是否包含当前版本应用支持的全部技能和子智能体；应用升级后可能需要补装。 */
+export function isOhStoryPackageComplete(installed: OhStoryPackage | null): boolean {
+  return Boolean(installed)
+    && (installed?.skills.length ?? 0) >= SKILL_SOURCES.length
+    && (installed?.agents.length ?? 0) >= AGENT_SOURCES.length;
+}
 
 const remoteSkillSchema = z.object({
   id: z.string().min(1),
@@ -250,7 +267,9 @@ export interface OhStoryUpdateProgress {
 const MOBILE_SKILL_POLICY = `## OpenFicM 移动端兼容规则
 
 此内容来自 oh-story-claudecode，只作为小说创作指令使用。
-- 使用 OpenFicM 提供的章节、角色、世界书、语义检索、技能和子智能体工具。
+- 使用 OpenFicM 提供的章节、角色、世界书、笔记、语义检索、技能和子智能体工具。
+- 需要联网查资料或榜单时使用 web_search 和 web_fetch；这两个工具不可用时如实告诉用户要先在“设置 → 联网搜索”里配置，不要编造数据。
+- 原文要求生成图片、调用图片接口或保存文件时，只交付文字内容（例如封面提示词），并说明手机端不生成图片。
 - 原文中的 Read/Grep/文件路径应映射为对应的 OpenFicM 读取或检索工具。
 - 不执行 shell、脚本、Hook、浏览器自动化、Git 操作或本地文件部署。
 - 引用资料在移动包中不可用时，基于当前已加载指令继续，不得声称已读取缺失文件。
@@ -362,7 +381,8 @@ export async function installOhStoryRelease(
     const comparison = compareOhStoryVersions(release.version, state.installed.version);
     const installedRevision = state.installed.commitSha ?? state.installed.treeSha;
     if (comparison < 0) throw new Error(`拒绝从 ${state.installed.version} 降级到 ${release.version}`);
-    if (comparison === 0 && installedRevision === release.commitSha) return state.installed;
+    const complete = isOhStoryPackageComplete(state.installed);
+    if (comparison === 0 && installedRevision === release.commitSha && complete) return state.installed;
     if (comparison === 0 && installedRevision && installedRevision !== release.commitSha) {
       throw new Error(`${release.version} 的 GitHub 源码修订已变化；为避免同版本内容被替换，已拒绝安装`);
     }

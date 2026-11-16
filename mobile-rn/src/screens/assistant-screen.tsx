@@ -47,6 +47,9 @@ import {
   getActiveStyleProfile,
   setActiveStyleProfile,
 } from "@/data/style-repositories";
+import { deleteAttachment, getSessionPlan, listAttachments } from "@/data/workspace-repositories";
+import { pickAttachment } from "@/lib/attachments";
+import { planProgress } from "@/agent/plan";
 import type { RootTabParamList } from "@/navigation/types";
 import { getAgentDefinitions } from "@/settings/config";
 import { listStyleProfileOptions, type StyleProfileOption } from "@/style/profile-options";
@@ -57,10 +60,12 @@ import type {
   AgentClarificationRequest,
   AgentClarificationResponse,
   AgentRunTrace,
+  ChatAttachment,
   ChatMessage,
   ChatSession,
   Model,
   ModelSelection,
+  PlanTodo,
   Project,
   Provider,
   StyleProfile,
@@ -220,6 +225,10 @@ export function AssistantScreen() {
   const [retryRequest, setRetryRequest] = useState<RetryRequest | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [plan, setPlan] = useState<PlanTodo[]>([]);
+  const [planExpanded, setPlanExpanded] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const composerRef = useRef<TextInput>(null);
   const loadRequestRef = useRef(0);
@@ -406,6 +415,57 @@ export function AssistantScreen() {
     setInput("");
     setEditingMessageId(null);
   }, [activeSession?.id]);
+
+  // 附件和任务计划都挂在对话上：切换对话、任务结束（revision 变化）时重新读取。
+  const activeSessionId = activeSession?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeSessionId) {
+      setAttachments([]);
+      setPlan([]);
+      return;
+    }
+    void Promise.all([listAttachments(activeSessionId), getSessionPlan(activeSessionId)])
+      .then(([nextAttachments, nextPlan]) => {
+        if (cancelled) return;
+        setAttachments(nextAttachments);
+        setPlan(nextPlan);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, revision, sending]);
+
+  const addAttachment = async () => {
+    if (!activeSessionId || attaching || sending) return;
+    setAttaching(true);
+    setError(null);
+    try {
+      const added = await pickAttachment(activeSessionId);
+      if (added) setAttachments((current) => [...current, added]);
+    } catch (attachError) {
+      setError(attachError instanceof Error ? attachError.message : String(attachError));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const removeAttachment = (attachment: ChatAttachment) => {
+    if (sending) return;
+    Alert.alert("移除附件", `从这个对话里移除“${attachment.fileName}”？原文件不受影响。`, [
+      { text: "取消", style: "cancel" },
+      {
+        text: "移除",
+        style: "destructive",
+        onPress: () => {
+          void deleteAttachment(attachment.id)
+            .then(() => setAttachments((current) => current.filter((item) => item.id !== attachment.id)))
+            .catch((removeError) => setError(removeError instanceof Error ? removeError.message : String(removeError)));
+        },
+      },
+    ]);
+  };
   useFocusEffect(useCallback(() => {
     void load();
     return () => {
@@ -679,6 +739,7 @@ export function AssistantScreen() {
         selection: runSelection,
         history: agentHistory,
         agentId: retry?.agentId ?? activeAgentId,
+        sessionId,
         approveTool: requestToolApproval,
         askUser,
         signal: controller.signal,
@@ -912,6 +973,44 @@ export function AssistantScreen() {
         </View>
         {error ? <View style={styles.errorWrap}><ErrorNotice message={error} onRetry={retryRequest ? () => void send(retryRequest) : () => void load()} /></View> : null}
         <View style={styles.composer}>
+          {plan.length ? (
+            <Pressable accessibilityRole="button" onPress={() => setPlanExpanded((value) => !value)} style={styles.planBar}>
+              <View style={styles.planHeader}>
+                <Ionicons name="list-outline" size={17} color={colors.primary} />
+                <Text style={styles.planTitle} numberOfLines={1}>
+                  任务计划 · {planProgress(plan)}
+                  {planExpanded ? "" : `　${plan.find((todo) => todo.status === "in_progress")?.content ?? ""}`}
+                </Text>
+                <Ionicons name={planExpanded ? "chevron-down" : "chevron-up"} size={16} color={colors.textMuted} />
+              </View>
+              {planExpanded ? plan.map((todo, index) => (
+                <View key={`${index}-${todo.content}`} style={styles.planRow}>
+                  <Ionicons
+                    name={todo.status === "completed" ? "checkmark-circle" : todo.status === "in_progress" ? "play-circle" : "ellipse-outline"}
+                    size={16}
+                    color={todo.status === "pending" ? colors.textMuted : colors.primary}
+                  />
+                  <Text style={[styles.planText, todo.status === "completed" && styles.planTextDone]}>{todo.content}</Text>
+                </View>
+              )) : null}
+            </Pressable>
+          ) : null}
+          {attachments.length ? (
+            <View style={styles.attachmentList}>
+              {attachments.map((attachment) => (
+                <Pressable
+                  key={attachment.id}
+                  accessibilityLabel={`移除附件 ${attachment.fileName}`}
+                  onPress={() => removeAttachment(attachment)}
+                  style={styles.attachmentChip}
+                >
+                  <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+                  <Text style={styles.attachmentName} numberOfLines={1}>{attachment.fileName}</Text>
+                  <Ionicons name="close" size={15} color={colors.textMuted} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           {editingMessageId ? (
             <View style={styles.editingBanner}>
               <View style={styles.editingCopy}>
@@ -924,6 +1023,16 @@ export function AssistantScreen() {
             </View>
           ) : null}
           <View style={styles.composerRow}>
+            <Pressable
+              accessibilityLabel="添加附件"
+              disabled={sending || attaching || !activeSessionId}
+              onPress={() => void addAttachment()}
+              style={[styles.attachButton, (sending || !activeSessionId) && styles.sendDisabled]}
+            >
+              {attaching
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Ionicons name="attach" size={24} color={colors.primary} />}
+            </Pressable>
             <TextInput
               ref={composerRef}
               value={input}
@@ -1154,6 +1263,16 @@ const styles = themedStyles((colors) => StyleSheet.create({
   editingCopy: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   editingText: { color: colors.primary, fontSize: 13, fontWeight: "600" },
   composerInput: { flex: 1, maxHeight: 130, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: 11, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, color: colors.text, fontSize: 16 },
+  attachButton: { width: 40, height: 46, alignItems: "center", justifyContent: "center" },
+  planBar: { gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  planHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  planTitle: { flex: 1, minWidth: 0, color: colors.text, fontSize: 13, fontWeight: "600" },
+  planRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, paddingVertical: 3 },
+  planText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 19 },
+  planTextDone: { color: colors.textMuted, textDecorationLine: "line-through" },
+  attachmentList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  attachmentChip: { maxWidth: "100%", minHeight: 34, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.background },
+  attachmentName: { flexShrink: 1, color: colors.text, fontSize: 12 },
   sendButton: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary },
   stopButton: { backgroundColor: colors.danger },
   sendDisabled: { opacity: 0.48 },

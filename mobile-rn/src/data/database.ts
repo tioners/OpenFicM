@@ -445,6 +445,93 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
   `);
   await migrateChatSessions(database);
   await migrateProviders(database);
+  await migrateWorkspaceFeatures(database);
+}
+
+async function ensureColumn(
+  database: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const columns = await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (columns.some((item) => item.name === column)) return;
+  await database.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+}
+
+/**
+ * 0.15 新增的数据：联网搜索服务、会话附件、角色关系、笔记分类、会话计划。
+ * 全部语句幂等。独占事务里外键不生效（见上面的一致性修复说明），所以这里同样兜底清理孤儿行。
+ */
+async function migrateWorkspaceFeatures(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS search_providers (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      base_url TEXT NOT NULL,
+      api_key_ref TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_attachments (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      format TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      character_count INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS character_relationships (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      target_character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(source_character_id, target_character_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS note_categories (
+      id TEXT PRIMARY KEY NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_attachments_session
+      ON chat_attachments(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_character_relationships_project
+      ON character_relationships(project_id);
+    CREATE INDEX IF NOT EXISTS idx_note_categories_project
+      ON note_categories(project_id, order_index);
+  `);
+  await ensureColumn(database, "notes", "category_id", "TEXT");
+  await ensureColumn(database, "chat_sessions", "plan_json", "TEXT");
+  await database.execAsync(`
+    DELETE FROM chat_attachments
+    WHERE NOT EXISTS (SELECT 1 FROM chat_sessions session WHERE session.id = chat_attachments.session_id);
+
+    DELETE FROM character_relationships
+    WHERE NOT EXISTS (SELECT 1 FROM characters item WHERE item.id = character_relationships.source_character_id)
+       OR NOT EXISTS (SELECT 1 FROM characters item WHERE item.id = character_relationships.target_character_id);
+
+    DELETE FROM note_categories
+    WHERE NOT EXISTS (SELECT 1 FROM projects project WHERE project.id = note_categories.project_id);
+
+    UPDATE notes
+    SET category_id = NULL
+    WHERE category_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM note_categories category WHERE category.id = notes.category_id);
+  `);
 }
 
 export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -458,4 +545,39 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
     });
   }
   return databasePromise;
+}
+
+/**
+ * 关闭当前数据库连接（恢复备份时要替换数据库文件）。
+ * 先把 WAL 落盘再关；之后任何 getDatabase() 调用都会重新打开并跑迁移。
+ * 思路来自社区补丁（打包一份凉皮）。
+ */
+export async function closeDatabase(): Promise<void> {
+  const pending = databasePromise;
+  if (!pending) return;
+  databasePromise = null;
+  const database = await pending.catch(() => null);
+  if (!database) return;
+  await database.execAsync("PRAGMA wal_checkpoint(TRUNCATE)").catch(() => undefined);
+  await database.closeAsync();
+}
+
+/** 校验一个候选数据库文件（恢复备份前用）：能打开、结构完整、有作品表。 */
+export async function inspectDatabaseFile(databaseName: string): Promise<{ projectCount: number }> {
+  const candidate = await SQLite.openDatabaseAsync(databaseName, { finalizeUnusedStatementsBeforeClosing: false });
+  try {
+    const check = await candidate.getFirstAsync<Record<string, string>>("PRAGMA quick_check");
+    const verdict = check ? String(Object.values(check)[0] ?? "") : "";
+    if (verdict.toLowerCase() !== "ok") throw new Error(`数据库完整性检查未通过：${verdict.slice(0, 120) || "无结果"}`);
+    const table = await candidate.getFirstAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+    );
+    if (!table) throw new Error("这不是 OpenFicM 的数据库：缺少作品表");
+    const row = await candidate.getFirstAsync<{ value: number }>("SELECT COUNT(*) AS value FROM projects");
+    // 切回 DELETE 日志模式，避免候选库旁边留下 -wal/-shm 文件，随后改名时把它们落在原地。
+    await candidate.execAsync("PRAGMA journal_mode = DELETE").catch(() => undefined);
+    return { projectCount: row?.value ?? 0 };
+  } finally {
+    await candidate.closeAsync().catch(() => undefined);
+  }
 }

@@ -9,7 +9,7 @@ import type { AgentRunTrace, AgentTraceEvent } from "@/types";
  */
 
 /** 只读工具不需要回放：重跑一次没有副作用。 */
-const READ_ONLY_TOOL = /^(list_|read_|search_)/;
+const READ_ONLY_TOOL = /^(list_|read_|search_|web_|query_|get_|write_plan$)/;
 
 /** 视为"动作"的事件种类：这些才是重试时真正需要避免重复的。 */
 function isActionEvent(event: AgentTraceEvent): boolean {
