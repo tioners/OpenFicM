@@ -12,6 +12,8 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 当前正式版本：0.14.0
 
+当前测试版本：0.15.0-beta.1（GitHub 预发布，分支 `feat/beta-0.15`，尚未合入 main）
+
 上游对齐基线：保留的 `backend`/`frontend`/`desktop` 停在上游 v0.10.0（2026-08-16）。上游此后已到 v0.13.0，对比上游现状时要用 `gh api repos/syrizelink/OpenFic/...` 读最新代码，不要以本地这三个目录为准。
 
 GitHub 仓库：
@@ -271,6 +273,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - Release 资产 OpenFicM-Android-0.10.3.apk，132,591,768 字节（126.45 MiB），SHA-256 C519D1E444425614669F7782E63C9E4647F35C1099E9780F1AC2EDFA2A8CB47E。
 - 包内核对：Hermes bundle（4,817,492 字节）按 1 字节命中全部 7 个新标识（jumpToBottom、sheetListScroll、questionScroll、formScroll 两处、modelSheetScroll、editSheetScroll、directoryListScroll），确认修复已进包。
 - 未做真机验证：进入定位最新、仅底部跟随、切页保留位置、悬浮按钮、长世界书条目保存、设置页与写作页弹层滚动都要在真机上确认一次。
+
+### 0.15.0-beta.1 记录
+
+- 用户需求：发布一版，包含上游对齐的联网搜索、网页读取、角色关系图谱、笔记分类、计划工具、技能管理、附件读取，吸收社区补丁（作品重命名、书籍导入、备份恢复），并修复 DeepSeek Responses 接口的 `reasoning_text` 400。
+- `reasoning_text`：0.14.0 只修了 chat/completions 的 `reasoning_content`；Responses 路径需要把 `output` 里 `type: "reasoning"` 的条目原样带回、并排在对应 function_call 之前。`AgentMessage.reasoningItems` 保存条目，`responsesInputItems` 按顺序插入；流式时优先用 `response.output_item.done` 里的 reasoning 条目，只有增量文本时补一条标准形状的条目。
+- 数据层：`migrateWorkspaceFeatures` 新增 `search_providers`、`chat_attachments`、`character_relationships`、`note_categories` 四张表，并给 `notes` 加 `category_id`、给 `chat_sessions` 加 `plan_json`；全部幂等，并兜底清理孤儿行。`closeDatabase` / `inspectDatabaseFile` 供备份恢复使用。
+- 联网搜索：`web/search-providers.ts`（请求组装与解析，纯函数）+ `web/web-tools.ts`（发送请求、网页读取）+ `screens/web-search-settings.tsx`。搜索服务与模型供应商同构：类型 + 自填 Base URL + Key 存 SecureStore，`web.activeSearchProviderId` 记录当前使用项。没有配置服务时 `web_search` 不下发。
+- 网页读取：重定向手动逐跳跟随并重新校验地址；拒绝本机、局域网、IPv6 本地地址和纯数字主机名；限制 5 MB、30 秒。
+- 附件：内容存进 `chat_attachments.content`，只在读取工具里按需分段取出；支持 TXT/Markdown/DOCX/EPUB，单文件 10 MB、200 万字符上限。
+- 工具下发：`agent/tool-selection.ts` 按能力推导，并按条件（搜索服务、附件、技能管理开关）追加；`web_search`/`web_fetch` 只给主智能体和 explorer/researcher 类子智能体；`write_plan` 只给主智能体；技能管理工具默认关闭。
+- 社区补丁（作者：打包一份凉皮）：作品重命名直接吸收；书籍导入改为 `lib/book-split.ts` 纯函数拆分 + `createProjectFromImport` 单事务写入；备份恢复重写为“校验 → 换名替换 → 失败还原”，并修正参考书路径。补丁附带的签名密钥库与口令未使用、未入库。
+- oh-story：技能从 7 个增加到 12 个，子智能体从 6 个增加到 7 个（新增 story-researcher）；`isOhStoryPackageComplete` 允许同版本补装。
+- 验证：16 组纯逻辑断言通过（含工具与权限项 59 个一一对应）；类型检查含严格模式通过；未做真机验证。
+- 构建：Gradle assembleRelease BUILD SUCCESSFUL（2m14s，无 GGUF）；apksigner v2 通过、证书 `c5dd7c04…`；versionCode 28、versionName 0.15.0-beta.1。
+- 发布资产 `OpenFicM-Android-0.15.0-beta.1.apk`，132,939,204 字节，SHA-256 `CE63A2579F4EBAD4875A713204346C26E066239342E53E14841B072DFF6D2610`，以 `--prerelease` 发布。
 
 ### 0.14.0 发布记录
 
