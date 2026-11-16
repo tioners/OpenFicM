@@ -10,16 +10,16 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.14.0
+当前正式版本：0.15.0
 
-当前测试版本：0.15.0-beta.1（GitHub 预发布，分支 `feat/beta-0.15`，尚未合入 main）
+0.15.0-beta.1 曾作为预发布用于验证，正式版同代码、版本号去掉 beta 后缀。
 
 上游对齐基线：保留的 `backend`/`frontend`/`desktop` 停在上游 v0.10.0（2026-08-16）。上游此后已到 v0.13.0，对比上游现状时要用 `gh api repos/syrizelink/OpenFic/...` 读最新代码，不要以本地这三个目录为准。
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.14.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.15.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -28,18 +28,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.14.0 发布提交，以 v0.14.0 标签为准
-- 本轮审查基线：3650830 docs: 记录 0.13.1 的 Gemini 兜底加固与验证方式
-- Release 标签：v0.14.0
+- 最新源码提交：本次 0.15.0 发布提交，以 v0.15.0 标签为准
+- 本轮审查基线：d395ff4 docs: 记录 0.15.0-beta.1 的实现与构建验证
+- Release 标签：v0.15.0
 - Android applicationId：com.openfic.mobile
-- versionCode：27
-- versionName：0.14.0
+- versionCode：28
+- versionName：0.15.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.14.0.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.15.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.14.0 继续使用 0.7.0 的正式证书，可以直接覆盖升级；内容是限流治理、`reasoning_content` 400 修复和与上游的一轮对齐，见 docs/releases/v0.14.0.md 与下文"0.14.0 发布记录"。0.13.1 是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
+0.15.0 继续使用 0.7.0 的正式证书，可以直接覆盖升级；内容是限流治理、`reasoning_content` 400 修复和与上游的一轮对齐，见 docs/releases/v0.14.0.md 与下文"0.14.0 发布记录"。0.13.1 是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 
@@ -287,7 +287,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - oh-story：技能从 7 个增加到 12 个，子智能体从 6 个增加到 7 个（新增 story-researcher）；`isOhStoryPackageComplete` 允许同版本补装。
 - 验证：16 组纯逻辑断言通过（含工具与权限项 59 个一一对应）；类型检查含严格模式通过；未做真机验证。
 - 构建：Gradle assembleRelease BUILD SUCCESSFUL（2m14s，无 GGUF）；apksigner v2 通过、证书 `c5dd7c04…`；versionCode 28、versionName 0.15.0-beta.1。
-- 发布资产 `OpenFicM-Android-0.15.0-beta.1.apk`，132,939,204 字节，SHA-256 `CE63A2579F4EBAD4875A713204346C26E066239342E53E14841B072DFF6D2610`，以 `--prerelease` 发布。
+- 测试版 0.15.0-beta.1 以 `--prerelease` 发布过，资产 `OpenFicM-Android-0.15.0-beta.1.apk`，SHA-256 `CE63A2579F4EBAD4875A713204346C26E066239342E53E14841B072DFF6D2610`；正式版 0.15.0 同代码、只改版本号后重新构建，资产 `OpenFicM-Android-0.15.0.apk`，132,939,104 字节，SHA-256 `80B452CD3E6C0F15C0B1F7F2ED4011DB91BE89840AD27A0E4511480537C2935E`，versionCode 28、versionName 0.15.0、apksigner v2 通过、证书 `c5dd7c04…`。
 
 ### 0.14.0 发布记录
 
