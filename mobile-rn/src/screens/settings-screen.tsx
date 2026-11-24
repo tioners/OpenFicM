@@ -3,7 +3,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useNavigation } from "@react-navigation/native";
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Button, ErrorNotice, Field, Header, Screen, SheetBackdrop } from "@/components/ui";
 import {
@@ -115,6 +115,17 @@ export function SettingsScreen() {
   useFocusEffect(useCallback(() => {
     void load();
   }, [load, revision]));
+
+  // 二级页面是用状态切出来的，不在导航栈里：系统返回键/手势要先退回设置首页，
+  // 否则会落到系统默认行为，直接把应用退到桌面。只在设置页可见且停在二级页面时接管。
+  useFocusEffect(useCallback(() => {
+    if (!activeCategory) return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setActiveCategory(null);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [activeCategory]));
 
   const modelsByProvider = useMemo(() => new Map(providers.map((provider) => [
     provider.id,
