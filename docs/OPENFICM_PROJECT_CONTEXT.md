@@ -1,6 +1,6 @@
 # OpenFicM 项目交接记录
 
-最后更新：2026-11-12
+最后更新：2026-11-25
 
 这份文档用于让新的开发窗口快速恢复项目上下文。继续工作前先阅读本文件、根目录 AGENTS.md、README.md 和 mobile-rn/DESIGN.md。
 
@@ -10,16 +10,16 @@ OpenFicM 是 OpenFic 的 React Native Android 独立移动端重构，不是把�
 
 应用不是完全断网产品：作品数据和本地 Agent 运行时在手机上，用户仍可配置任意供应商的模型 API、获取供应商模型列表，并在首次启动时从 GitHub/Hugging Face 获取 Agent、Skill、嵌入和重排资源。API Base URL、Key、模型和供应商均由用户配置。
 
-当前正式版本：0.15.0
+当前正式版本：0.16.0
 
-0.15.0-beta.1 曾作为预发布用于验证，正式版同代码、版本号去掉 beta 后缀。
+0.16.0 处理 GitHub issue #6（设置页二级菜单系统返回键）和 #7（上下文按 Token 上限保留、超出时丢弃或生成摘要），见 docs/releases/v0.16.0.md 与下文“0.16.0 发布记录”。0.15.0-beta.1 曾作为预发布用于验证，0.15.0 正式版同代码、版本号去掉 beta 后缀。
 
 上游对齐基线：保留的 `backend`/`frontend`/`desktop` 停在上游 v0.10.0（2026-08-16）。上游此后已到 v0.13.0，对比上游现状时要用 `gh api repos/syrizelink/OpenFic/...` 读最新代码，不要以本地这三个目录为准。
 
 GitHub 仓库：
 
 - 源码：https://github.com/tioners/OpenFicM
-- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.15.0
+- 正式 Release：https://github.com/tioners/OpenFicM/releases/tag/v0.16.0
 - 上游 OpenFic：https://github.com/syrizelink/OpenFic
 - Skill/Agent 内容来源：https://github.com/worldwonderer/oh-story-claudecode
 
@@ -28,18 +28,18 @@ GitHub 仓库：
 ## 2. 当前交付状态
 
 - Git 分支：main
-- 最新源码提交：本次 0.15.0 发布提交，以 v0.15.0 标签为准
-- 本轮审查基线：d395ff4 docs: 记录 0.15.0-beta.1 的实现与构建验证
-- Release 标签：v0.15.0
+- 最新源码提交：本次 0.16.0 发布提交，以 v0.16.0 标签为准
+- 本轮审查基线：e6d8d79 docs: 0.15.0 正式版发布说明与构建记录
+- Release 标签：v0.16.0
 - Android applicationId：com.openfic.mobile
-- versionCode：28
-- versionName：0.15.0
+- versionCode：29
+- versionName：0.16.0
 - 最低 Android：9.0，minSdk 28
 - ABI：仅 arm64-v8a
-- Release APK：仓库根目录 OpenFicM-Android-0.15.0.apk；APK 和密钥均被 Git 忽略
+- Release APK：仓库根目录 OpenFicM-Android-0.16.0.apk；APK 和密钥均被 Git 忽略
 - 正式签名证书 SHA-256：c5dd7c047dc88fdeee64bd4311cddbe7ebc3ba60ea1485670b7543870dddf863
 
-0.15.0 继续使用 0.7.0 的正式证书，可以直接覆盖升级；内容是限流治理、`reasoning_content` 400 修复和与上游的一轮对齐，见 docs/releases/v0.14.0.md 与下文"0.14.0 发布记录"。0.13.1 是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
+0.16.0 继续使用 0.7.0 的正式证书，可以直接覆盖升级；内容是设置页二级菜单的系统返回键和上下文保留策略，见 docs/releases/v0.16.0.md。0.15.0 是助手能力对齐上游的一版（联网搜索、网页读取、计划、附件、角色关系、笔记分类、技能管理）并修复 Responses 接口的 `reasoning_text` 400，见 docs/releases/v0.15.0.md。0.14.0 的内容是限流治理、`reasoning_content` 400 修复和与上游的一轮对齐，见 docs/releases/v0.14.0.md 与下文"0.14.0 发布记录"。0.13.1 是 0.13.0 的补充加固：用户仍贴出 `properties[N].value = "STRING"` 的 400，用旧算法模拟 build 智能体 22 个工具可完整复现该报错（说明来自旧包），因此新版在请求组装处再加 `sanitizeGeminiSchema` 递归清洗——参数表出现字符串等非对象值就地改写为 `{ type }`，并让失败提示能识别 Gemini 格式错误、直接引导核对版本，详见 docs/releases/v0.13.1.md。0.13.0 的三件事：夜间模式（调色板代理 + 按明暗缓存样式表）、断连执行记录（占位消息落盘 + 重试注入已完成写操作摘要）、Gemini 400 根因修复（`toGeminiSchema` 把 properties 映射当成 schema），见 v0.13.0.md。0.12.1 去掉关键词预判（v0.12.1.md），0.12.0 助手回复改为 Markdown 渲染（v0.12.0.md），0.11.0 见 v0.11.0.md（该版发布时本文件未同步，已补记）。更早：0.10.3 弹层与对话滚动修复（v0.10.3.md）、0.10.2 独占事务外键失效导致的孤儿数据（v0.10.2.md）、0.10.1 文风选择器统一（v0.10.1.md）、0.10.0 蒸馏后台化与供应商接口选择（v0.10.0.md）。
 
 ## 3. 功能清单
 
@@ -113,8 +113,9 @@ GitHub 仓库：
 - src/markdown/markdown-parser.ts：markdown-it 的纯函数封装（`html: false`、`breaks: true`），解析失败退回单段纯文本；纯 JS 无原生依赖，可脱离 RN 在 Node 里断言。
 - src/components/markdown-view.tsx：token → RN 组件。链接只放行 http/https/mailto，图片只显示占位不加载远程资源，代码块与表格横向滚动。
 - src/screens/style-library-screen.tsx：参考书导入、文风蒸馏、参考文风与作者文风版本和作品级选择。
-- src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。
+- src/screens/settings-screen.tsx、settings-category-screen.tsx：设置分类和设置项。二级页面是用 `activeCategory` 状态切出来的，不在导航栈里，系统返回键由 settings-screen.tsx 里的 `hardwareBackPress` 监听接管；以后新增这种“状态切出来的子页面”也要自己处理返回键。
 - src/agent/runtime.ts：Agent 主循环、工具调用、结构化提问、子 Agent 协作和 trace。
+- src/agent/context-budget.ts：对话历史的保留策略（纯函数）。按条数或按 Token 上限截取、规划哪一段并入摘要、组装摘要请求、Token 估算；读设置、调模型、写库在 runtime.ts 的 `prepareHistory`。摘要存在 `chat_sessions.context_summary_json`（`{ throughMessageId, content }`），靠 `throughMessageId` 是否还在历史里判断是否作废。
 - src/agent/tools.ts：移动端本地工具定义和执行边界。新增工具时必须同步 `src/settings/config.ts` 的 `TOOL_CATALOG`（权限页与默认权限来自它），两边不一致会出现"有工具没权限项"。
 - src/agent/tool-selection.ts：每个智能体实际拿到哪些工具（纯函数）。内容包里的 `toolNames` 白名单绑定在固定提交上，所以新增工具按"已有能力推导同类工具"下发：能列章节就能列卷，会写章节才带卷管理和文风工具。
 - src/agent/context-pruning.ts：发请求前把较早的只读工具结果换成占位符（纯函数）；只改发出去的那一份，主循环里的 `messages` 保持完整。
@@ -274,6 +275,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 - 包内核对：Hermes bundle（4,817,492 字节）按 1 字节命中全部 7 个新标识（jumpToBottom、sheetListScroll、questionScroll、formScroll 两处、modelSheetScroll、editSheetScroll、directoryListScroll），确认修复已进包。
 - 未做真机验证：进入定位最新、仅底部跟随、切页保留位置、悬浮按钮、长世界书条目保存、设置页与写作页弹层滚动都要在真机上确认一次。
 
+### 0.16.0 发布记录
+
+- 用户反馈（GitHub issue #6、#7，提交者 XKPU）：设置页二级菜单按系统返回键直接退到桌面；上下文只能按消息条数保留，希望能按模型的上下文 Token 数限制，并在达到上限时可选丢弃或 LLM 摘要。提交 `afa1b90`（返回键）、`12e7325`（上下文）、`8c393fc`（版本号）。
+- 返回键根因：设置的二级页面是 `activeCategory` 状态切出来的，导航栈里没有可回退的路由，系统返回落到默认行为。RN 0.86 在 targetSdk 36 下由 `ReactActivity` 的常开 `OnBackPressedCallback` 把预测性返回转给 JS，所以 `BackHandler` 的 `hardwareBackPress` 在开启 `enableOnBackInvokedCallback` 时仍然有效（已读 node_modules 里的 ReactActivity.java 确认）；代价是这类页面没有预测性返回的预览动画。
+- 上下文：新增 `context.limitMode`（`count`/`tokens`）、`context.tokenLimit`（4000 到 2000000，默认 128000）、`context.overflow`（`drop`/`summarize`），默认值与旧行为一致。按 Token 时消息额度 = (上限 − 模型输出上限) × 0.9 − 工具定义；历史额度再扣系统提示词、已激活技能指令和摘要预留。主循环里每次发请求前用 `fitToolOutputs` 兜底。摘要接在系统提示词末尾，不占 user/assistant 轮次。
+- 顺手的行为修正：`pruneToolOutputs` 不再把比占位说明还短的工具结果换成占位符（换了反而变长）；设置页的三段选择器抽成 `OptionRow`，夜间模式、限制方式、超出处理共用。
+- 验证：`npm run type-check` 与 `--noUnusedLocals --noUnusedParameters` 通过；`context-budget.ts`、`context-pruning.ts` 用 `npx tsc --ignoreConfig` 转译后在 Node 里跑 11 组断言全部通过（按条数截取与旧实现在 3000 组随机对话上逐一比对一致）。转译时会报 `@/llm/types` 找不到，那是脱离 tsconfig 后别名解析不到，只是类型导入，不影响产物。测试脚本放在仓库外的临时目录，跑完即删，未入库。
+- 构建：这次在原生 PowerShell 7 会话里直接 `& .\scripts\build-release.ps1`（不再嵌套 `powershell -File`），脚本末尾的 Get-FileHash 正常输出，没有再遇到 PSModulePath 的问题。Gradle assembleRelease BUILD SUCCESSFUL（1m45s，583 个任务，无 GGUF 条目）；apksigner v2 通过、证书仍为 `c5dd7c04…`；aapt2 报 versionCode 29、versionName 0.16.0、minSdk 28、targetSdk 36、仅 arm64-v8a。
+- Release 资产 `OpenFicM-Android-0.16.0.apk`，132,956,112 字节（126.80 MiB），SHA-256 `106BD0C6650E1816EA03834B301127CCCB0D6E82EDA89AFF7E67C205271FF1F4`。
+- 包内核对：Hermes bundle（5,181,836 字节）按 1 字节命中 `context.limitMode`、`context.tokenLimit`、`context.overflow`、`context_summary_json`、`hardwareBackPress`、`throughMessageId`。
+- 未做真机验证：返回键的实际表现、设置页新选项的排版、摘要请求在真实供应商上的效果都只在代码与包级校验层面确认过；摘要生成没有对真实模型跑过。
+- 构建时工作区里有两处与本次 issue 无关的未提交改动（`mobile-rn/App.tsx`、`src/components/ui.tsx`，夜间模式下输入框文字颜色），构建前暂存、发布后恢复，**没有进入 0.16.0**。
+
 ### 0.15.0-beta.1 记录
 
 - 用户需求：发布一版，包含上游对齐的联网搜索、网页读取、角色关系图谱、笔记分类、计划工具、技能管理、附件读取，吸收社区补丁（作品重命名、书籍导入、备份恢复），并修复 DeepSeek Responses 接口的 `reasoning_text` 400。
@@ -337,7 +351,9 @@ gh release create v0.9.0 .\OpenFicM-Android-0.9.0.apk --repo tioners/OpenFicM --
 - 文风蒸馏已由用户在真机跑通完整一轮：薄荷中转 + grok-4.6，《斗破苍穹》（540 万字，识别出 1646 章），生成参考文风 V1，界面正确切到"继续蒸馏"并显示"覆盖到第 24/1646 章"。
 - 蒸馏对供应商的要求偏高，换中转/模型时容易踩坑。单次请求约 20,600 字符：Lorn 方法论占 12,000（`STYLE_MODEL_INSTRUCTION_CHARACTERS`），样本占 8,400（`ANALYSIS_BATCH_SIZE` 6 × `ANALYSIS_PASSAGE_CHARACTERS` 1,400），中文约合 15K-20K tokens，是普通聊天请求的 5-7 倍，按 TPM 计费的中转容易限流。已实测：公益中转小请求成功、蒸馏请求立刻 429；openrouter 的 stealth/ox-alpha 在汇总步骤返回 HTTP 200 + 非 JSON 响应体。
 - 方法论正文在一轮 4 个批次里被重复发送 4 次，累计约 48,000 字符。若要降低单请求体量，可调 `STYLE_MODEL_INSTRUCTION_CHARACTERS` 或 `ANALYSIS_BATCH_SIZE`，但两者分别影响方法论保真度和每轮请求次数，属于需要用户拍板的取舍，尚未修改。
-- 上下文窗口与蒸馏问题无关，不要混淆：429 是 TPM 限流（每分钟吞吐），截断是输出 token 上限，两者都不随上下文窗口变大而缓解。应用侧没有上下文窗口设置，只有 `context.historyLimit`（消息条数）和 `MAX_TOOL_TEXT_CHARACTERS`（工具返回字符数）。1M 上下文唯一的用武之地是加大每批样本数，但那会让单请求更大，在限流严的中转上适得其反。
+- 上下文窗口与蒸馏问题无关，不要混淆：429 是 TPM 限流（每分钟吞吐），截断是输出 token 上限，两者都不随上下文窗口变大而缓解。0.16.0 起“设置 → 上下文”可以按 Token 上限保留对话（`context.limitMode` = `tokens`、`context.tokenLimit`），但它只管助手对话，蒸馏不读这组设置；蒸馏的单请求体量仍由上面两个常量和 `MAX_TOOL_TEXT_CHARACTERS`（工具返回字符数）决定。1M 上下文对蒸馏唯一的用武之地是加大每批样本数，但那会让单请求更大，在限流严的中转上适得其反。
+- 上下文的 Token 数是按字符估算的（非 ASCII 1 个、ASCII 0.3 个，留 10% 余量），不是真实分词；上限是全局一个值，不按模型区分。如果用户反馈“明明没到上限却被供应商报超长”，先看是不是写入类工具结果占满了（它们不会被清理），再考虑调估算比例或做成按模型配置。
+- 摘要模式每次压缩多发一个模型请求，不计入 24 次预算；压缩后保留段缩到上限的一半，所以要再涨半个上限才会触发下一次。
 - 0.7.4 的 APK 仅在助手侧做过真机验证，复杂创作任务是否仍触发 429、一致性检查状态是否如实显示，仍需在真我 GT7 和红米 K90 PRO MAX 上实测，同时观察长期创作、升级、分享导出和本地模型内存表现。
 - 24 次模型请求预算是按主智能体 12 轮加一层子智能体 12 轮估算的上限。如果实测中正常任务频繁撞上限，应先确认是不是模型陷入了工具调用循环，再考虑调整 MAX_TOTAL_MODEL_REQUESTS，不要直接放大预算。
 - CPU-only 是当前环境的构建结果；旗舰手机性能足够，但首次加载 GGUF 仍可能需要时间和较多内存。
