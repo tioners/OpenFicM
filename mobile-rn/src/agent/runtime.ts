@@ -40,9 +40,30 @@ import type {
 } from "@/types";
 
 import { listNotes, noteScope } from "@/data/note-repositories";
-import { getSessionPlan, listAttachments, listSearchProviders } from "@/data/workspace-repositories";
+import {
+  getSessionContextSummary,
+  getSessionPlan,
+  listAttachments,
+  listSearchProviders,
+  saveSessionContextSummary,
+} from "@/data/workspace-repositories";
+import { normalizeMaxOutputTokens } from "@/llm/limits";
 
 import { agentTools, executeAgentTool } from "./tools";
+import {
+  SUMMARY_TOKEN_RESERVE,
+  appendSummaryToPrompt,
+  buildSummaryRequest,
+  estimateTokens,
+  fitToolOutputs,
+  inputTokenBudget,
+  normalizeSummaryContent,
+  planHistory,
+  resolveContextPolicy,
+  type ContextPolicy,
+  type HistoryEntry,
+  type HistoryLimit,
+} from "./context-budget";
 import { pruneToolOutputs } from "./context-pruning";
 import { toolsForAgent as selectToolsForAgent, type ToolAvailability } from "./tool-selection";
 import { formatPlanForPrompt } from "./plan";
@@ -77,7 +98,7 @@ type RuntimeCatalog = {
   rules: AgentRule[];
   skills: AgentSkill[];
   permissions: Record<string, ToolPermissionMode>;
-  historyLimit: number;
+  context: ContextPolicy;
   compressSystemPrompts: boolean;
   pruneToolOutputs: boolean;
   styleSelectionConfigured: boolean;
@@ -106,7 +127,7 @@ type RequestBudget = { remaining: number };
 type LoopInput = {
   project: Project;
   selection: ModelSelection;
-  history: AgentMessage[];
+  history: HistoryEntry[];
   catalog: RuntimeCatalog;
   agent: AgentDefinition;
   consistencyReason: string | null;
@@ -531,6 +552,64 @@ async function selectionForAgent(agent: AgentDefinition, fallback: ModelSelectio
   return { model, provider, apiKey };
 }
 
+/**
+ * 按"上下文"设置决定本次带哪些历史：超出上限的部分丢弃，或并入保存在对话上的摘要。
+ * 摘要只给主智能体做——子智能体的历史只有一条委派任务。摘要失败时退回丢弃，不让整次任务跟着失败。
+ */
+async function prepareHistory(
+  input: LoopInput,
+  limit: HistoryLimit,
+): Promise<{ history: AgentMessage[]; summary: string | null }> {
+  const sessionId = input.depth === 0 && input.catalog.context.overflow === "summarize"
+    ? input.catalog.sessionId
+    : null;
+  const plan = planHistory(
+    input.history,
+    limit,
+    sessionId ? "summarize" : "drop",
+    sessionId ? await getSessionContextSummary(sessionId) : null,
+  );
+  let keepFrom = plan.keepFrom;
+  let summary = plan.summary;
+  if (plan.summarize && sessionId) {
+    const pending = input.history.slice(plan.summarize.from, plan.summarize.to);
+    const eventId = input.recorder.add({
+      kind: "tool",
+      status: "running",
+      title: "整理较早的对话",
+      agentName: input.agent.name,
+      detail: `正在把较早的 ${pending.length} 条消息压缩成摘要`,
+    });
+    try {
+      const turn = await callModel(
+        input.selection,
+        buildSummaryRequest(summary?.content ?? null, pending),
+        [],
+        { signal: input.signal },
+      );
+      const content = normalizeSummaryContent(turn.content);
+      if (!content) throw new Error("模型没有返回摘要内容");
+      summary = { throughMessageId: pending[pending.length - 1].id, content };
+      await saveSessionContextSummary(sessionId, summary);
+      input.recorder.update(eventId, {
+        status: "completed",
+        detail: `已把较早的 ${pending.length} 条消息压缩成 ${content.length} 字的摘要`,
+      });
+    } catch (error) {
+      throwIfAborted(input.signal);
+      keepFrom = plan.dropKeepFrom;
+      input.recorder.update(eventId, {
+        status: "error",
+        detail: `摘要生成失败，本次改为丢弃较早的消息：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+  return {
+    history: input.history.slice(keepFrom).map((entry) => ({ role: entry.role, content: entry.content })),
+    summary: summary?.content ?? null,
+  };
+}
+
 async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
   const prompt = systemPrompt({
     project: input.project,
@@ -539,20 +618,33 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
     consistencyReason: input.consistencyReason,
     userRequest: input.userRequest,
   });
-  // 长会话截取后第一条可能是 assistant；Anthropic 等协议要求首条非系统消息必须是 user，去掉前导 assistant。
-  const trimmedHistory = input.history.slice(-input.catalog.historyLimit);
-  while (trimmedHistory.length && trimmedHistory[0].role !== "user") trimmedHistory.shift();
+  const systemContent = input.catalog.compressSystemPrompts
+    ? prompt.split("\n").map((line) => line.trim()).filter(Boolean).join("\n")
+    : prompt;
+  const tools = toolsForAgent(input.agent, input.catalog.toolAvailability);
+  const allowedToolNames = new Set(tools.map((tool) => tool.name));
+  const policy = input.catalog.context;
+  // 按 Token 限制时，一次请求里消息部分能用的额度：上限先扣掉留给回复的输出上限，再扣工具定义。
+  const messageTokenBudget = policy.limitMode === "tokens"
+    ? inputTokenBudget(policy.tokenLimit, normalizeMaxOutputTokens(input.selection.model.maxTokens))
+      - estimateTokens(JSON.stringify(tools))
+    : null;
+  const prepared = await prepareHistory(input, messageTokenBudget === null
+    ? { mode: "count", maxMessages: policy.historyLimit }
+    : {
+      mode: "tokens",
+      maxTokens: messageTokenBudget
+        - estimateTokens(systemContent)
+        - (input.requiredSkill ? estimateTokens(input.requiredSkill.instructions) : 0)
+        - (policy.overflow === "summarize" ? SUMMARY_TOKEN_RESERVE : 0),
+    });
   const messages: AgentMessage[] = [
     {
       role: "system",
-      content: input.catalog.compressSystemPrompts
-        ? prompt.split("\n").map((line) => line.trim()).filter(Boolean).join("\n")
-        : prompt,
+      content: prepared.summary ? appendSummaryToPrompt(systemContent, prepared.summary) : systemContent,
     },
-    ...trimmedHistory,
+    ...prepared.history,
   ];
-  const tools = toolsForAgent(input.agent, input.catalog.toolAvailability);
-  const allowedToolNames = new Set(tools.map((tool) => tool.name));
   let consistencyRequired = Boolean(input.consistencyReason);
   let characterConsistencyChecked = false;
   let worldConsistencyChecked = false;
@@ -596,9 +688,10 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
     }
     input.budget.remaining -= 1;
     // 只裁剪"要发出去的那一份"：messages 本身保留完整结果，工具配对与 trace 不受影响。
+    const outgoing = input.catalog.pruneToolOutputs ? pruneToolOutputs(messages) : messages;
     const turn = await callModel(
       input.selection,
-      input.catalog.pruneToolOutputs ? pruneToolOutputs(messages) : messages,
+      messageTokenBudget === null ? outgoing : fitToolOutputs(outgoing, messageTokenBudget),
       tools,
       { signal: input.signal },
     );
@@ -689,7 +782,7 @@ async function runAgentLoop(input: LoopInput): Promise<LoopResult> {
           const childResult = await runAgentLoop({
             ...input,
             selection: childSelection,
-            history: [{ role: "user", content: task }],
+            history: [{ id: "delegated-task", role: "user", content: task }],
             agent: childAgent,
             consistencyReason: null,
             consistencyEventId: null,
@@ -806,13 +899,16 @@ export async function runAgent(input: {
 }): Promise<AgentRunResult> {
   throwIfAborted(input.signal);
   const consistencyKey = `agent.pendingConsistency.${input.project.id}`;
-  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, compressValue, pruneValue, pendingConsistency, styleSelection, availableStyleProfiles, notes, searchProviders, webFetchValue, skillManagementValue, attachments, plan] = await Promise.all([
+  const [rules, skills, agents, permissions, activeAgentId, historyLimitValue, limitModeValue, tokenLimitValue, overflowValue, compressValue, pruneValue, pendingConsistency, styleSelection, availableStyleProfiles, notes, searchProviders, webFetchValue, skillManagementValue, attachments, plan] = await Promise.all([
     getAgentRules(),
     getAgentSkills(),
     getAgentDefinitions(),
     getToolPermissions(),
     getSetting("agent.activeDefinitionId"),
     getSetting("context.historyLimit"),
+    getSetting("context.limitMode"),
+    getSetting("context.tokenLimit"),
+    getSetting("context.overflow"),
     getSetting("context.compressSystemPrompts"),
     getSetting("context.pruneToolOutputs"),
     getSetting(consistencyKey),
@@ -825,15 +921,17 @@ export async function runAgent(input: {
     input.sessionId ? listAttachments(input.sessionId) : Promise.resolve([]),
     input.sessionId ? getSessionPlan(input.sessionId) : Promise.resolve([]),
   ]);
-  const parsedHistoryLimit = Number(historyLimitValue);
   const catalog: RuntimeCatalog = {
     rules,
     skills,
     agents,
     permissions,
-    historyLimit: Number.isInteger(parsedHistoryLimit) && parsedHistoryLimit >= 4 && parsedHistoryLimit <= 100
-      ? parsedHistoryLimit
-      : 30,
+    context: resolveContextPolicy({
+      limitMode: limitModeValue,
+      historyLimit: historyLimitValue,
+      tokenLimit: tokenLimitValue,
+      overflow: overflowValue,
+    }),
     compressSystemPrompts: compressValue === "true",
     // 默认开启：未设置过（null）时也按开启处理。
     pruneToolOutputs: pruneValue !== "false",
@@ -876,7 +974,7 @@ export async function runAgent(input: {
       selection: input.selection,
       history: input.history
         .filter((message) => !(message.role === "assistant" && message.metadata?.taskStatus === "failed"))
-        .map((message) => ({ role: message.role, content: message.content })),
+        .map((message) => ({ id: message.id, role: message.role, content: message.content })),
       catalog,
       agent,
       consistencyReason,

@@ -68,6 +68,18 @@ import {
   type AppUpdateInfo,
 } from "@/settings/app-update";
 import { colors, getThemeMode, radius, setThemeMode, spacing, type ThemeMode } from "@/theme";
+import {
+  DEFAULT_CONTEXT_TOKEN_LIMIT,
+  DEFAULT_HISTORY_LIMIT,
+  MAX_CONTEXT_TOKEN_LIMIT,
+  MAX_HISTORY_LIMIT,
+  MIN_CONTEXT_TOKEN_LIMIT,
+  MIN_HISTORY_LIMIT,
+  parseContextTokenLimit,
+  resolveContextPolicy,
+  type ContextLimitMode,
+  type ContextOverflowMode,
+} from "@/agent/context-budget";
 import { themedStyles } from "@/themed-styles";
 import type { Model } from "@/types";
 
@@ -146,6 +158,28 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
+function OptionRow<T extends string>({ options, value, onChange }: {
+  options: Array<[T, string]>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View style={styles.optionRow}>
+      {options.map(([option, label]) => (
+        <Pressable
+          key={option}
+          accessibilityRole="button"
+          accessibilityState={{ selected: value === option }}
+          onPress={() => onChange(option)}
+          style={[styles.option, value === option && styles.optionActive]}
+        >
+          <Text style={[styles.optionText, value === option && styles.optionTextActive]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 export function SettingsCategoryScreen({ category, onBack }: { category: CategoryScreenKey; onBack: () => void }) {
   const projectId = useAppStore((state) => state.currentProjectId);
   const refreshData = useAppStore((state) => state.refreshData);
@@ -173,7 +207,10 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
   const [agentDescription, setAgentDescription] = useState("");
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentModelId, setAgentModelId] = useState("");
-  const [historyLimit, setHistoryLimit] = useState("30");
+  const [historyLimit, setHistoryLimit] = useState(String(DEFAULT_HISTORY_LIMIT));
+  const [contextLimitMode, setContextLimitMode] = useState<ContextLimitMode>("count");
+  const [contextTokenLimit, setContextTokenLimit] = useState(String(DEFAULT_CONTEXT_TOKEN_LIMIT));
+  const [contextOverflow, setContextOverflow] = useState<ContextOverflowMode>("drop");
   const [compression, setCompression] = useState(false);
   const [pruneToolOutputs, setPruneToolOutputs] = useState(true);
   const [autoSaveDelay, setAutoSaveDelay] = useState("1000");
@@ -258,7 +295,7 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
     setLoading(true);
     setError(null);
     try {
-      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, compress, prune, autoSave, fontSize, timeout, attempts, serverAttempts, rateLimitAttempts, retryOnTimeoutValue, streamValue, nextModels, nextOhStoryState, nextResourceState] = await Promise.all([
+      const [nextIndex, nextRules, nextSkills, nextAgents, nextPermissions, active, history, limitMode, tokenLimit, overflow, compress, prune, autoSave, fontSize, timeout, attempts, serverAttempts, rateLimitAttempts, retryOnTimeoutValue, streamValue, nextModels, nextOhStoryState, nextResourceState] = await Promise.all([
         getIndexSettings(),
         getAgentRules(),
         getAgentSkills(),
@@ -266,6 +303,9 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
         getToolPermissions(),
         getSetting("agent.activeDefinitionId"),
         getSetting("context.historyLimit"),
+        getSetting("context.limitMode"),
+        getSetting("context.tokenLimit"),
+        getSetting("context.overflow"),
         getSetting("context.compressSystemPrompts"),
         getSetting("context.pruneToolOutputs"),
         getSetting("general.autoSaveDelay"),
@@ -292,7 +332,11 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
       const nextActiveAgentId = activeAgent?.id ?? "";
       setActiveAgentId(nextActiveAgentId);
       if (nextActiveAgentId !== (active ?? "")) await setSetting("agent.activeDefinitionId", nextActiveAgentId);
-      setHistoryLimit(history ?? "30");
+      const contextPolicy = resolveContextPolicy({ limitMode, historyLimit: history, tokenLimit, overflow });
+      setHistoryLimit(history ?? String(DEFAULT_HISTORY_LIMIT));
+      setContextLimitMode(contextPolicy.limitMode);
+      setContextTokenLimit(String(contextPolicy.tokenLimit));
+      setContextOverflow(contextPolicy.overflow);
       setCompression(compress === "true");
       setPruneToolOutputs(prune !== "false");
       setAutoSaveDelay(autoSave ?? "1000");
@@ -329,6 +373,15 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
     } finally {
       setSaving(false);
     }
+  };
+
+  // 非法值不落库：否则界面上显示的是用户填的数，实际却悄悄按默认值生效。
+  const saveContextTokenLimit = () => {
+    if (parseContextTokenLimit(contextTokenLimit) === null) {
+      setError(`上下文 Token 上限必须是 ${MIN_CONTEXT_TOKEN_LIMIT} 到 ${MAX_CONTEXT_TOKEN_LIMIT} 之间的整数`);
+      return;
+    }
+    void savePreference("context.tokenLimit", contextTokenLimit.trim());
   };
 
   const downloadResources = async () => {
@@ -611,27 +664,15 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
       {category === "general" ? (
         <View style={styles.section}>
           <Text style={styles.fieldLabel}>夜间模式</Text>
-          <View style={styles.themeRow}>
-            {([
-              ["system", "跟随系统"],
-              ["light", "浅色"],
-              ["dark", "深色"],
-            ] as Array<[ThemeMode, string]>).map(([value, label]) => (
-              <Pressable
-                key={value}
-                accessibilityRole="button"
-                accessibilityState={{ selected: themeMode === value }}
-                onPress={() => {
-                  setThemeModeState(value);
-                  setThemeMode(value);
-                  void savePreference("general.themeMode", value);
-                }}
-                style={[styles.themeOption, themeMode === value && styles.themeOptionActive]}
-              >
-                <Text style={[styles.themeOptionText, themeMode === value && styles.themeOptionTextActive]}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <OptionRow
+            options={[["system", "跟随系统"], ["light", "浅色"], ["dark", "深色"]]}
+            value={themeMode}
+            onChange={(value) => {
+              setThemeModeState(value);
+              setThemeMode(value);
+              void savePreference("general.themeMode", value);
+            }}
+          />
           <Text style={styles.fieldHint}>跟随系统时会随手机的深色模式自动切换；改动立即生效，不需要重启。</Text>
           <Field label="自动保存延迟（毫秒）" value={autoSaveDelay} onChangeText={setAutoSaveDelay} onBlur={() => void savePreference("general.autoSaveDelay", autoSaveDelay)} keyboardType="number-pad" />
           <Field label="编辑器字号" value={editorFontSize} onChangeText={setEditorFontSize} onBlur={() => void savePreference("general.editorFontSize", editorFontSize)} keyboardType="number-pad" />
@@ -676,7 +717,33 @@ export function SettingsCategoryScreen({ category, onBack }: { category: Categor
       ) : null}
       {category === "context" ? (
         <View style={styles.section}>
-          <Field label="保留最近消息数" value={historyLimit} onChangeText={setHistoryLimit} onBlur={() => void savePreference("context.historyLimit", historyLimit)} keyboardType="number-pad" />
+          <Text style={styles.fieldLabel}>上下文限制方式</Text>
+          <OptionRow
+            options={[["count", "按消息条数"], ["tokens", "按 Token 数"]]}
+            value={contextLimitMode}
+            onChange={(value) => {
+              setContextLimitMode(value);
+              void savePreference("context.limitMode", value);
+            }}
+          />
+          {contextLimitMode === "count" ? (
+            <Field label={`保留最近消息数（${MIN_HISTORY_LIMIT}-${MAX_HISTORY_LIMIT}）`} value={historyLimit} onChangeText={setHistoryLimit} onBlur={() => void savePreference("context.historyLimit", historyLimit)} keyboardType="number-pad" />
+          ) : (
+            <>
+              <Field label="上下文 Token 上限" value={contextTokenLimit} onChangeText={setContextTokenLimit} onBlur={saveContextTokenLimit} keyboardType="number-pad" />
+              <Text style={styles.fieldHint}>按所用模型的上下文窗口填写，例如 128000；换用窗口更小的模型时记得调低。应用会先扣掉该模型的“最大输出 Token 数”，剩下的额度用来放系统提示词、工具定义和对话，对话从最新一条往前装，装不下的算作超出。Token 数按字符估算（一个汉字约 1 个，三四个英文字符约 1 个），并留 10% 余量。一次任务里工具结果把请求撑到上限时，较早的读取结果会被强制清理，不受下面开关影响。</Text>
+            </>
+          )}
+          <Text style={styles.fieldLabel}>超出上限时</Text>
+          <OptionRow
+            options={[["drop", "丢弃较早消息"], ["summarize", "生成摘要"]]}
+            value={contextOverflow}
+            onChange={(value) => {
+              setContextOverflow(value);
+              void savePreference("context.overflow", value);
+            }}
+          />
+          <Text style={styles.fieldHint}>丢弃：超出的较早消息不再发给模型，聊天记录本身不会删除。生成摘要：超出时用当前模型把较早的一半对话压缩成摘要，保存在这个对话里，之后每次请求都带上；只有压缩那一次会多发一个模型请求，摘要失败时自动按丢弃处理。</Text>
           <ToggleRow label="压缩系统提示词" value={compression} onChange={(value) => {
             setCompression(value);
             void savePreference("context.compressSystemPrompts", String(value));
@@ -898,11 +965,11 @@ const styles = themedStyles((colors) => StyleSheet.create({
   sectionHint: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
   fieldHint: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: -spacing.sm },
   fieldLabel: { color: colors.text, fontSize: 13, fontWeight: "600", marginBottom: -spacing.sm },
-  themeRow: { flexDirection: "row", gap: spacing.sm },
-  themeOption: { flex: 1, minHeight: 42, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
-  themeOptionActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-  themeOptionText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
-  themeOptionTextActive: { color: colors.primary, fontWeight: "700" },
+  optionRow: { flexDirection: "row", gap: spacing.sm },
+  option: { flex: 1, minHeight: 42, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
+  optionActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  optionText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  optionTextActive: { color: colors.primary, fontWeight: "700" },
   settingRow: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   settingLabel: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
   settingValue: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 19, textAlign: "right" },

@@ -516,6 +516,7 @@ async function migrateWorkspaceFeatures(database: SQLite.SQLiteDatabase): Promis
   `);
   await ensureColumn(database, "notes", "category_id", "TEXT");
   await ensureColumn(database, "chat_sessions", "plan_json", "TEXT");
+  await ensureColumn(database, "chat_sessions", "context_summary_json", "TEXT");
   await database.execAsync(`
     DELETE FROM chat_attachments
     WHERE NOT EXISTS (SELECT 1 FROM chat_sessions session WHERE session.id = chat_attachments.session_id);

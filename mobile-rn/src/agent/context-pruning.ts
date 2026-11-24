@@ -57,7 +57,10 @@ export function pruneToolOutputs(
       .filter((index) => isPrunable(messages[index])),
   );
   if (!prunable.size) return messages;
-  return messages.map((message, index) => (
-    prunable.has(index) ? { ...message, content: prunedContent(message) } : message
-  ));
+  return messages.map((message, index) => {
+    if (!prunable.has(index)) return message;
+    const placeholder = prunedContent(message);
+    // 本来就比占位说明短的结果原样留着，换了反而变长。
+    return placeholder.length < message.content.length ? { ...message, content: placeholder } : message;
+  });
 }

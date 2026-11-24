@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 
 import { createId } from "@/lib/id";
+import { parseContextSummary, type ContextSummary } from "@/agent/context-budget";
 import { normalizePlanTodos } from "@/agent/plan";
 import type {
   CharacterRelationship,
@@ -322,6 +323,31 @@ export async function saveSessionPlan(sessionId: string, todos: PlanTodo[]): Pro
   await db.runAsync(
     "UPDATE chat_sessions SET plan_json = ? WHERE id = ?",
     todos.length ? JSON.stringify(todos) : null,
+    sessionId,
+  );
+}
+
+// ---------- 会话的较早对话摘要 ----------
+
+export async function getSessionContextSummary(sessionId: string): Promise<ContextSummary | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ context_summary_json: string | null }>(
+    "SELECT context_summary_json FROM chat_sessions WHERE id = ?",
+    sessionId,
+  );
+  if (!row?.context_summary_json) return null;
+  try {
+    return parseContextSummary(JSON.parse(row.context_summary_json));
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSessionContextSummary(sessionId: string, summary: ContextSummary): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    "UPDATE chat_sessions SET context_summary_json = ? WHERE id = ?",
+    JSON.stringify(summary),
     sessionId,
   );
 }
